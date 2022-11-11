@@ -5,6 +5,8 @@ gstalpha = library('gstalpha', 'gstalpha.c',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstalpha, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstalpha]
 
 gstalphacolor = library('gstalphacolor', 'gstalphacolor.c',
   c_args : gst_plugins_good_args,
@@ -13,3 +15,5 @@ gstalphacolor = library('gstalphacolor', 'gstalphacolor.c',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstalphacolor, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstalphacolor]

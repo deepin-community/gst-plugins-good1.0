@@ -74,7 +74,20 @@ push_lost_event (GstHarness * h, guint32 seqnum,
   }
 
   if (event_goes_through) {
-    fail_unless (packet_loss_in == packet_loss_out);
+    const GstStructure *s = gst_event_get_structure (packet_loss_out);
+    guint64 tscopy, durcopy;
+    gboolean might_have_been_fec;
+
+    fail_unless (gst_structure_has_name (s, "GstRTPPacketLost"));
+    fail_if (gst_structure_has_field (s, "seqnum"));
+    fail_unless (gst_structure_get_uint64 (s, "timestamp", &tscopy));
+    fail_unless (gst_structure_get_uint64 (s, "duration", &durcopy));
+    fail_unless (gst_structure_get_boolean (s, "might-have-been-fec",
+            &might_have_been_fec));
+
+    fail_unless_equals_uint64 (timestamp, tscopy);
+    fail_unless_equals_uint64 (duration, durcopy);
+    fail_unless (might_have_been_fec == TRUE);
     gst_event_unref (packet_loss_out);
   } else {
     fail_unless (NULL == packet_loss_out);
@@ -88,18 +101,31 @@ lose_and_recover_test (GstHarness * h, guint16 lost_seq,
   guint64 duration = 222222;
   guint64 timestamp = 111111;
   GstBuffer *bufout;
+  GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
+  GstRTPBuffer rtpout = GST_RTP_BUFFER_INIT;
+  GstBuffer *wrap;
+  gpointer reccopy = g_malloc (recbuf_size);
+
+  memcpy (reccopy, recbuf, recbuf_size);
 
   push_lost_event (h, lost_seq, timestamp, duration, FALSE);
 
   bufout = gst_harness_pull (h);
   fail_unless_equals_int (gst_buffer_get_size (bufout), recbuf_size);
   fail_unless_equals_int (GST_BUFFER_PTS (bufout), timestamp);
-  fail_unless (gst_buffer_memcmp (bufout, 0, recbuf, recbuf_size) == 0);
+  wrap = gst_buffer_new_wrapped (reccopy, recbuf_size);
+  gst_rtp_buffer_map (wrap, GST_MAP_WRITE, &rtp);
+  gst_rtp_buffer_map (bufout, GST_MAP_READ, &rtpout);
+  gst_rtp_buffer_set_seq (&rtp, gst_rtp_buffer_get_seq (&rtpout));
+  fail_unless (gst_buffer_memcmp (bufout, 0, reccopy, recbuf_size) == 0);
+  gst_rtp_buffer_unmap (&rtp);
+  gst_rtp_buffer_unmap (&rtpout);
   fail_unless (!GST_BUFFER_FLAG_IS_SET (bufout, GST_RTP_BUFFER_FLAG_REDUNDANT));
   gst_buffer_unref (bufout);
+  gst_buffer_unref (wrap);
 
   /* Pushing the next buffer with discont flag set */
-  bufout = gst_buffer_new ();
+  bufout = gst_rtp_buffer_new_allocate (0, 0, 0);
   GST_BUFFER_FLAG_SET (bufout, GST_BUFFER_FLAG_DISCONT);
   bufout = gst_harness_push_and_pull (h, bufout);
   /* Checking the flag was unset */
@@ -111,8 +137,11 @@ static void
 push_data (GstHarness * h, gconstpointer rtp, gsize rtp_length)
 {
   GstBuffer *buf = gst_rtp_buffer_new_copy_data (rtp, rtp_length);
+  GstBuffer *bufout;
 
-  gst_harness_push_and_pull (h, buf);
+  bufout = gst_harness_push_and_pull (h, buf);
+  if (bufout)
+    gst_buffer_unref (bufout);
 }
 
 static GstHarness *
@@ -215,7 +244,7 @@ _recovered_from_fec_base (guint32 ssrc, guint8 fec_pt,
 
 GST_START_TEST (rtpulpfecdec_recovered_from_fec)
 {
-  _recovered_from_fec_base (3536077562, 123, 100, 36921,
+  _recovered_from_fec_base (3536077562UL, 123, 100, 36921,
       SAMPLE_ULPFEC0_FEC, sizeof (SAMPLE_ULPFEC0_FEC) - 1,
       SAMPLE_ULPFEC0_MEDIA, sizeof (SAMPLE_ULPFEC0_MEDIA) - 1);
 }
@@ -224,8 +253,8 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_recovered_from_fec_long)
 {
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 100, 123);
-  RecoveredPacketInfo info = {.pt = 100,.ssrc = 3536077562,.seq = 36921 };
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 100, 123);
+  RecoveredPacketInfo info = {.pt = 100,.ssrc = 3536077562UL,.seq = 36921 };
   const guint8 fec[] = SAMPLE_ULPFEC0_FEC;
   guint8 *feclongmask = NULL;
   GList *expected = expect_recovered_packets (h, &info, 1);
@@ -265,7 +294,7 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_recovered_from_many)
 {
-  GstHarness *h = harness_rtpulpfecdec (578322839, 126, 22);
+  GstHarness *h = harness_rtpulpfecdec (578322839UL, 126, 22);
   static const gchar *packets[] = {
     SAMPLE_ULPFEC1_MEDIA0,
     SAMPLE_ULPFEC1_MEDIA1,
@@ -285,7 +314,7 @@ GST_START_TEST (rtpulpfecdec_recovered_from_many)
   guint lost_seq = __i__ + 8476;
   const gchar *lost_packet = packets[__i__];
   gsize lost_packet_size = packets_size[__i__];
-  RecoveredPacketInfo info = {.pt = 126,.ssrc = 578322839,.seq = lost_seq };
+  RecoveredPacketInfo info = {.pt = 126,.ssrc = 578322839UL,.seq = lost_seq };
   GList *expected = expect_recovered_packets (h, &info, 1);
   gsize i;
 
@@ -433,13 +462,13 @@ SampleRTPPacket avmcu_fec_packets[] = {
 
 GST_START_TEST (rtpulpfecdec_recovered_using_recovered_packet)
 {
-  GstHarness *h = harness_rtpulpfecdec (578322839, 126, 22);
+  GstHarness *h = harness_rtpulpfecdec (578322839UL, 126, 22);
   RecoveredPacketInfo info[3] = {
-    {.pt = 126,.ssrc = 578322839,.seq = 8477}
+    {.pt = 126,.ssrc = 578322839UL,.seq = 8477}
     ,
-    {.pt = 126,.ssrc = 578322839,.seq = 8476}
+    {.pt = 126,.ssrc = 578322839UL,.seq = 8476}
     ,
-    {.pt = 126,.ssrc = 578322839,.seq = 8479}
+    {.pt = 126,.ssrc = 578322839UL,.seq = 8479}
   };
   GList *expected = expect_recovered_packets (h, info, 3);
 
@@ -461,7 +490,7 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_recovered_from_storage)
 {
-  GstHarness *h = harness_rtpulpfecdec (578322839, 126, 22);
+  GstHarness *h = harness_rtpulpfecdec (578322839UL, 126, 22);
 
   // The packet we want to recover is already in the storage
   push_data (h, SAMPLE_ULPFEC1_MEDIA0, sizeof (SAMPLE_ULPFEC1_MEDIA0) - 1);
@@ -483,10 +512,15 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_recovered_push_failed)
 {
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 100, 123);
-  RecoveredPacketInfo info = {.pt = 100,.ssrc = 3536077562,.seq = 36921 };
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 100, 123);
+  RecoveredPacketInfo info = {.pt = 100,.ssrc = 3536077562UL,.seq = 36921 };
   GList *expected = expect_recovered_packets (h, &info, 1);
+
+  // the harness is already PLAYING because there are no src pads, which
+  // means the error-after counter isn't set, so reset and start again.
+  gst_element_set_state (h->element, GST_STATE_NULL);
   gst_harness_set (h, "identity", "error-after", 2, NULL);
+  gst_harness_play (h);
 
   push_data (h, SAMPLE_ULPFEC0_FEC, sizeof (SAMPLE_ULPFEC0_FEC) - 1);
   push_lost_event (h, 36921, 1111, 2222, FALSE);
@@ -507,7 +541,7 @@ GST_START_TEST (rtpulpfecdec_invalid_fec_size_mismatch)
   static const guint packet_sizes[] = { 21, 25,
     sizeof (SAMPLE_ULPFEC0_FEC) - 2, sizeof (SAMPLE_ULPFEC0_FEC)
   };
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 100, 123);
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 100, 123);
 
   push_data (h, SAMPLE_ULPFEC0_FEC, packet_sizes[__i__]);
   push_lost_event (h, 36921, 1111, 2222, TRUE);
@@ -522,7 +556,7 @@ GST_START_TEST (rtpulpfecdec_invalid_fec_ebit_not_zero)
 {
   const guint8 fec[] = SAMPLE_ULPFEC0_FEC;
   guint8 *fec_ebit_not_zero = NULL;
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 100, 123);
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 100, 123);
 
   // Changing E bit: 0 -> 1
   fec_ebit_not_zero = g_malloc (sizeof (fec) - 1);
@@ -541,7 +575,7 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_invalid_recovered)
 {
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 50, 22);
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 50, 22);
 
   push_data (h, SAMPLE_ISSUE_7049, sizeof (SAMPLE_ISSUE_7049) - 1);
   push_lost_event (h, 36921, 1111, 2222, TRUE);
@@ -554,9 +588,10 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_invalid_recovered_pt_mismatch)
 {
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 100, 123);
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 100, 123);
   GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
   GstBuffer *modified;
+  GstBuffer *bufout;
 
   gst_harness_set_src_caps_str (h, "application/x-rtp,ssrc=(uint)3536077562");
 
@@ -580,7 +615,9 @@ GST_START_TEST (rtpulpfecdec_invalid_recovered_pt_mismatch)
   gst_rtp_buffer_set_seq (&rtp, 36920);
   gst_rtp_buffer_unmap (&rtp);
   /* Now we have media packet with pt=50 and caps with pt=50. */
-  gst_harness_push_and_pull (h, modified);
+  bufout = gst_harness_push_and_pull (h, modified);
+  if (bufout)
+    gst_buffer_unref (bufout);
   push_lost_event (h, 36921, 1111, 2222, TRUE);
   check_rtpulpfecdec_stats (h, 0, 3);
 
@@ -596,11 +633,13 @@ GST_END_TEST;
 
 GST_START_TEST (rtpulpfecdec_fecstorage_gives_no_buffers)
 {
-  GstHarness *h = harness_rtpulpfecdec (3536077562, 100, 123);
+  GstHarness *h = harness_rtpulpfecdec (3536077562UL, 100, 123);
 
   push_lost_event (h, 36921, 1111, 2222, TRUE);
 
   check_rtpulpfecdec_stats (h, 0, 1);
+
+  gst_harness_teardown (h);
 }
 
 GST_END_TEST;

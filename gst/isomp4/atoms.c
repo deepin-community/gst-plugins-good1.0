@@ -54,10 +54,11 @@
  * Creates a new AtomsContext for the given flavor.
  */
 AtomsContext *
-atoms_context_new (AtomsTreeFlavor flavor)
+atoms_context_new (AtomsTreeFlavor flavor, gboolean force_create_timecode_trak)
 {
   AtomsContext *context = g_new0 (AtomsContext, 1);
   context->flavor = flavor;
+  context->force_create_timecode_trak = force_create_timecode_trak;
   return context;
 }
 
@@ -78,11 +79,10 @@ atoms_context_free (AtomsContext * context)
 guint64
 atoms_get_current_qt_time (void)
 {
-  GTimeVal timeval;
+  gint64 curtime_s = g_get_real_time () / G_USEC_PER_SEC;
 
-  g_get_current_time (&timeval);
   /* FIXME this should use UTC coordinated time */
-  return timeval.tv_sec + (((1970 - 1904) * (guint64) 365) +
+  return curtime_s + (((1970 - 1904) * (guint64) 365) +
       LEAP_YEARS_FROM_1904_TO_1970) * SECS_PER_DAY;
 }
 
@@ -422,18 +422,23 @@ atom_tcmi_clear (AtomTCMI * tcmi)
   tcmi->font_name = NULL;
 }
 
-static void
-atom_tmcd_init (AtomTMCD * tmcd)
+static AtomTMCD *
+atom_tmcd_new (void)
 {
+  AtomTMCD *tmcd = g_new0 (AtomTMCD, 1);
+
   atom_header_set (&tmcd->header, FOURCC_tmcd, 0, 0);
   atom_tcmi_init (&tmcd->tcmi);
+
+  return tmcd;
 }
 
 static void
-atom_tmcd_clear (AtomTMCD * tmcd)
+atom_tmcd_free (AtomTMCD * tmcd)
 {
   atom_clear (&tmcd->header);
   atom_tcmi_clear (&tmcd->tcmi);
+  g_free (tmcd);
 }
 
 static void
@@ -461,7 +466,6 @@ atom_gmhd_init (AtomGMHD * gmhd)
 {
   atom_header_set (&gmhd->header, FOURCC_gmhd, 0, 0);
   atom_gmin_init (&gmhd->gmin);
-  atom_tmcd_init (&gmhd->tmcd);
 }
 
 static void
@@ -469,7 +473,10 @@ atom_gmhd_clear (AtomGMHD * gmhd)
 {
   atom_clear (&gmhd->header);
   atom_gmin_clear (&gmhd->gmin);
-  atom_tmcd_clear (&gmhd->tmcd);
+  if (gmhd->tmcd) {
+    atom_tmcd_free (gmhd->tmcd);
+    gmhd->tmcd = NULL;
+  }
 }
 
 static AtomGMHD *
@@ -485,6 +492,34 @@ atom_gmhd_free (AtomGMHD * gmhd)
 {
   atom_gmhd_clear (gmhd);
   g_free (gmhd);
+}
+
+static void
+atom_nmhd_init (AtomNMHD * nmhd)
+{
+  atom_header_set (&nmhd->header, FOURCC_nmhd, 0, 0);
+  nmhd->flags = 0;
+}
+
+static void
+atom_nmhd_clear (AtomNMHD * nmhd)
+{
+  atom_clear (&nmhd->header);
+}
+
+static AtomNMHD *
+atom_nmhd_new (void)
+{
+  AtomNMHD *nmhd = g_new0 (AtomNMHD, 1);
+  atom_nmhd_init (nmhd);
+  return nmhd;
+}
+
+static void
+atom_nmhd_free (AtomNMHD * nmhd)
+{
+  atom_nmhd_clear (nmhd);
+  g_free (nmhd);
 }
 
 static void
@@ -685,6 +720,7 @@ atom_stsd_remove_entries (AtomSTSD * stsd)
       case TIMECODE:
         sample_entry_tmcd_free ((SampleTableEntryTMCD *) se);
         break;
+      case CLOSEDCAPTION:
       default:
         /* best possible cleanup */
         atom_sample_entry_free (se);
@@ -728,6 +764,8 @@ atom_ctts_free (AtomCTTS * ctts)
   g_free (ctts);
 }
 
+/* svmi is specified in ISO 23000-11 (Stereoscopic video application format)
+ * MPEG-A */
 static void
 atom_svmi_init (AtomSVMI * svmi)
 {
@@ -812,6 +850,9 @@ atom_co64_init (AtomSTCO64 * co64)
   guint8 flags[3] = { 0, 0, 0 };
 
   atom_full_init (&co64->header, FOURCC_stco, 0, 0, 0, flags);
+
+  co64->chunk_offset = 0;
+  co64->max_offset = 0;
   atom_array_init (&co64->entries, 256);
 }
 
@@ -1122,6 +1163,10 @@ atom_minf_clear_handlers (AtomMINF * minf)
     atom_gmhd_free (minf->gmhd);
     minf->gmhd = NULL;
   }
+  if (minf->nmhd) {
+    atom_nmhd_free (minf->nmhd);
+    minf->nmhd = NULL;
+  }
 }
 
 static void
@@ -1146,8 +1191,7 @@ atom_mdhd_init (AtomMDHD * mdhd)
   /* tempting as it may be to simply 0-initialize,
    * that will have the demuxer (correctly) come up with 'eng' as language
    * so explicitly specify undefined instead */
-  mdhd->language_code =
-      ('u' - 0x60) * 0x400 + ('n' - 0x60) * 0x20 + ('d' - 0x60);
+  mdhd->language_code = language_code ("und");
   mdhd->quality = 0;
 }
 
@@ -1941,9 +1985,24 @@ atom_gmhd_copy_data (AtomGMHD * gmhd, guint8 ** buffer, guint64 * size,
   if (!atom_gmin_copy_data (&gmhd->gmin, buffer, size, offset)) {
     return 0;
   }
-  if (!atom_tmcd_copy_data (&gmhd->tmcd, buffer, size, offset)) {
+  if (gmhd->tmcd && !atom_tmcd_copy_data (gmhd->tmcd, buffer, size, offset)) {
     return 0;
   }
+
+  atom_write_size (buffer, size, offset, original_offset);
+  return original_offset - *offset;
+}
+
+static guint64
+atom_nmhd_copy_data (AtomNMHD * nmhd, guint8 ** buffer, guint64 * size,
+    guint64 * offset)
+{
+  guint64 original_offset = *offset;
+
+  if (!atom_copy_data (&nmhd->header, buffer, size, offset)) {
+    return 0;
+  }
+  prop_copy_uint32 (nmhd->flags, buffer, size, offset);
 
   atom_write_size (buffer, size, offset, original_offset);
   return original_offset - *offset;
@@ -2222,6 +2281,20 @@ sample_entry_tmcd_copy_data (SampleTableEntryTMCD * tmcd, guint8 ** buffer,
   return *offset - original_offset;
 }
 
+static guint64
+sample_entry_generic_copy_data (SampleTableEntry * entry, guint8 ** buffer,
+    guint64 * size, guint64 * offset)
+{
+  guint64 original_offset = *offset;
+
+  if (!atom_sample_entry_copy_data (entry, buffer, size, offset)) {
+    return 0;
+  }
+
+  atom_write_size (buffer, size, offset, original_offset);
+  return *offset - original_offset;
+}
+
 guint64
 atom_stsz_copy_data (AtomSTSZ * stsz, guint8 ** buffer, guint64 * size,
     guint64 * offset)
@@ -2348,7 +2421,17 @@ atom_stco64_copy_data (AtomSTCO64 * stco64, guint8 ** buffer, guint64 * size,
 {
   guint64 original_offset = *offset;
   guint i;
-  gboolean trunc_to_32 = stco64->header.header.type == FOURCC_stco;
+
+  /* If any (mdat-relative) offset will by over 32-bits when converted to an
+   * absolute file offset then we need to write a 64-bit co64 atom, otherwise
+   * we can write a smaller stco 32-bit table */
+  gboolean write_stco64 =
+      (stco64->max_offset + stco64->chunk_offset) > G_MAXUINT32;
+
+  if (write_stco64)
+    stco64->header.header.type = FOURCC_co64;
+  else
+    stco64->header.header.type = FOURCC_stco;
 
   if (!atom_full_copy_data (&stco64->header, buffer, size, offset)) {
     return 0;
@@ -2364,10 +2447,10 @@ atom_stco64_copy_data (AtomSTCO64 * stco64, guint8 ** buffer, guint64 * size,
     guint64 value =
         atom_array_index (&stco64->entries, i) + stco64->chunk_offset;
 
-    if (trunc_to_32) {
-      prop_copy_uint32 ((guint32) value, buffer, size, offset);
-    } else {
+    if (write_stco64) {
       prop_copy_uint64 (value, buffer, size, offset);
+    } else {
+      prop_copy_uint32 ((guint32) value, buffer, size, offset);
     }
   }
 
@@ -2452,6 +2535,11 @@ atom_stsd_copy_data (AtomSTSD * stsd, guint8 ** buffer, guint64 * size,
           }
         } else if (se->kind == TIMECODE) {
           if (!sample_entry_tmcd_copy_data ((SampleTableEntryTMCD *)
+                  walker->data, buffer, size, offset)) {
+            return 0;
+          }
+        } else if (se->kind == CLOSEDCAPTION) {
+          if (!sample_entry_generic_copy_data ((SampleTableEntry *)
                   walker->data, buffer, size, offset)) {
             return 0;
           }
@@ -2593,6 +2681,10 @@ atom_minf_copy_data (AtomMINF * minf, guint8 ** buffer, guint64 * size,
     }
   } else if (minf->gmhd) {
     if (!atom_gmhd_copy_data (minf->gmhd, buffer, size, offset)) {
+      return 0;
+    }
+  } else if (minf->nmhd) {
+    if (!atom_nmhd_copy_data (minf->nmhd, buffer, size, offset)) {
       return 0;
     }
   }
@@ -3084,8 +3176,8 @@ atom_stco64_add_entry (AtomSTCO64 * stco64, guint64 entry)
     return FALSE;
 
   atom_array_append (&stco64->entries, entry, 256);
-  if (entry > G_MAXUINT32)
-    stco64->header.header.type = FOURCC_co64;
+  if (entry > stco64->max_offset)
+    stco64->max_offset = entry;
 
   return TRUE;
 }
@@ -3255,7 +3347,7 @@ atom_trak_update_duration (AtomTRAK * trak, guint64 moov_timescale)
       atom_stts_get_total_duration (&trak->mdia.minf.stbl.stts);
   if (trak->mdia.mdhd.time_info.timescale != 0) {
     trak->tkhd.duration =
-        gst_util_uint64_scale (trak->mdia.mdhd.time_info.duration,
+        gst_util_uint64_scale_round (trak->mdia.mdhd.time_info.duration,
         moov_timescale, trak->mdia.mdhd.time_info.timescale);
   } else {
     trak->tkhd.duration = 0;
@@ -3315,7 +3407,7 @@ atom_moov_update_duration (AtomMOOV * moov)
     AtomTRAK *trak = (AtomTRAK *) traks->data;
 
     /* Skip timecodes for now: they have a placeholder duration */
-    if (trak->mdia.minf.gmhd == NULL) {
+    if (trak->mdia.minf.gmhd == NULL || trak->mdia.minf.gmhd->tmcd == NULL) {
       atom_trak_update_duration (trak, atom_moov_get_timescale (moov));
       dur = atom_trak_get_duration (trak);
       if (dur > duration)
@@ -3328,7 +3420,7 @@ atom_moov_update_duration (AtomMOOV * moov)
   while (traks) {
     AtomTRAK *trak = (AtomTRAK *) traks->data;
 
-    if (trak->mdia.minf.gmhd != NULL)
+    if (trak->mdia.minf.gmhd != NULL && trak->mdia.minf.gmhd->tmcd != NULL)
       timecode_atom_trak_set_duration (trak, duration,
           atom_moov_get_timescale (moov));
     traks = g_list_next (traks);
@@ -4051,21 +4143,72 @@ atom_trak_set_timecode_type (AtomTRAK * trak, AtomsContext * context,
     guint32 trak_timescale, GstVideoTimeCode * tc)
 {
   SampleTableEntryTMCD *ste;
+
+  if (context->flavor != ATOMS_TREE_FLAVOR_MOV &&
+      !context->force_create_timecode_trak) {
+    return NULL;
+  }
+
+
+  if (context->flavor == ATOMS_TREE_FLAVOR_MOV) {
+    AtomGMHD *gmhd = trak->mdia.minf.gmhd;
+
+    gmhd = atom_gmhd_new ();
+    gmhd->gmin.graphics_mode = 0x0040;
+    gmhd->gmin.opcolor[0] = 0x8000;
+    gmhd->gmin.opcolor[1] = 0x8000;
+    gmhd->gmin.opcolor[2] = 0x8000;
+    gmhd->tmcd = atom_tmcd_new ();
+    gmhd->tmcd->tcmi.text_size = 12;
+    gmhd->tmcd->tcmi.font_name = g_strdup ("Chicago");  /* Pascal string */
+
+    trak->mdia.minf.gmhd = gmhd;
+  } else if (context->force_create_timecode_trak) {
+    AtomNMHD *nmhd = trak->mdia.minf.nmhd;
+    /* MOV files use GMHD, other files use NMHD */
+
+    nmhd = atom_nmhd_new ();
+    trak->mdia.minf.nmhd = nmhd;
+  } else {
+    return NULL;
+  }
+  ste = atom_trak_add_timecode_entry (trak, context, trak_timescale, tc);
+  trak->is_video = FALSE;
+  trak->is_h264 = FALSE;
+
+  return ste;
+}
+
+SampleTableEntry *
+atom_trak_set_caption_type (AtomTRAK * trak, AtomsContext * context,
+    guint32 trak_timescale, guint32 caption_type)
+{
+  SampleTableEntry *ste;
   AtomGMHD *gmhd = trak->mdia.minf.gmhd;
+  AtomSTSD *stsd = &trak->mdia.minf.stbl.stsd;
 
   if (context->flavor != ATOMS_TREE_FLAVOR_MOV) {
     return NULL;
   }
 
-  ste = atom_trak_add_timecode_entry (trak, context, trak_timescale, tc);
+  trak->mdia.mdhd.time_info.timescale = trak_timescale;
+  trak->mdia.hdlr.component_type = FOURCC_mhlr;
+  trak->mdia.hdlr.handler_type = FOURCC_clcp;
+  g_free (trak->mdia.hdlr.name);
+  trak->mdia.hdlr.name = g_strdup ("Closed Caption Media Handler");
+
+  ste = g_new0 (SampleTableEntry, 1);
+  atom_sample_entry_init (ste, caption_type);
+  ste->kind = CLOSEDCAPTION;
+  ste->data_reference_index = 1;
+  stsd->entries = g_list_prepend (stsd->entries, ste);
+  stsd->n_entries++;
 
   gmhd = atom_gmhd_new ();
   gmhd->gmin.graphics_mode = 0x0040;
   gmhd->gmin.opcolor[0] = 0x8000;
   gmhd->gmin.opcolor[1] = 0x8000;
   gmhd->gmin.opcolor[2] = 0x8000;
-  gmhd->tmcd.tcmi.text_size = 12;
-  gmhd->tmcd.tcmi.font_name = g_strdup ("Chicago");     /* Pascal string */
 
   trak->mdia.minf.gmhd = gmhd;
   trak->is_video = FALSE;
@@ -4129,57 +4272,10 @@ build_colr_extension (const GstVideoColorimetry * colorimetry, gboolean is_mp4)
   guint16 transfer_function;
   guint16 matrix;
 
-  switch (colorimetry->primaries) {
-    case GST_VIDEO_COLOR_PRIMARIES_BT709:
-      primaries = 1;
-      break;
-    case GST_VIDEO_COLOR_PRIMARIES_BT470BG:
-      primaries = 5;
-      break;
-    case GST_VIDEO_COLOR_PRIMARIES_SMPTE170M:
-    case GST_VIDEO_COLOR_PRIMARIES_SMPTE240M:
-      primaries = 6;
-      break;
-    case GST_VIDEO_COLOR_PRIMARIES_BT2020:
-      primaries = 9;
-      break;
-    case GST_VIDEO_COLOR_PRIMARIES_UNKNOWN:
-    default:
-      primaries = 2;
-      break;
-  }
-
-  switch (colorimetry->transfer) {
-    case GST_VIDEO_TRANSFER_BT709:
-      transfer_function = 1;
-      break;
-    case GST_VIDEO_TRANSFER_SMPTE240M:
-      transfer_function = 7;
-      break;
-    case GST_VIDEO_TRANSFER_UNKNOWN:
-    default:
-      transfer_function = 2;
-      break;
-  }
-
-  switch (colorimetry->matrix) {
-    case GST_VIDEO_COLOR_MATRIX_BT709:
-      matrix = 1;
-      break;
-    case GST_VIDEO_COLOR_MATRIX_BT601:
-      matrix = 6;
-      break;
-    case GST_VIDEO_COLOR_MATRIX_SMPTE240M:
-      matrix = 7;
-      break;
-    case GST_VIDEO_COLOR_MATRIX_BT2020:
-      matrix = 9;
-      break;
-    case GST_VIDEO_COLOR_MATRIX_UNKNOWN:
-    default:
-      matrix = 2;
-      break;
-  }
+  primaries = gst_video_color_primaries_to_iso (colorimetry->primaries);
+  transfer_function =
+      gst_video_transfer_function_to_iso (colorimetry->transfer);
+  matrix = gst_video_color_matrix_to_iso (colorimetry->matrix);
 
   atom_data_alloc_mem (atom_data, 10 + (is_mp4 ? 1 : 0));
   data = atom_data->data;
@@ -4284,11 +4380,8 @@ atom_trak_set_video_type (AtomTRAK * trak, AtomsContext * context,
   /* ISO file spec says track header w/h indicates track's visual presentation
    * (so this together with pixels w/h implicitly defines PAR) */
   if (par_n && (context->flavor != ATOMS_TREE_FLAVOR_MOV)) {
-    /* Assumes square pixels display */
-    if (!gst_video_calculate_display_ratio (&dwidth, &dheight, entry->width,
-            entry->height, par_n, par_d, 1, 1)) {
-      GST_WARNING ("Could not calculate display ratio");
-    }
+    dwidth = entry->width * par_n / par_d;
+    dheight = entry->height;
   }
 
   atom_trak_set_video_commons (trak, context, scale, dwidth, dheight);

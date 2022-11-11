@@ -20,8 +20,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include <unistd.h>
-
 /* suppress warnings for deprecated API such as GValueArray
  * with newer GLib versions (>= 2.31.0) */
 #define GLIB_DISABLE_DEPRECATION_WARNINGS
@@ -568,7 +566,7 @@ GST_START_TEST (test_message_timestamps)
   fail_if ((outbuffer = (GstBuffer *) buffers->data) == NULL);
   fail_unless (inbuffer == outbuffer);
 
-  /* check that timestamp + duration is contigous to the next timestamp */
+  /* check that timestamp + duration is contiguous to the next timestamp */
   message = gst_bus_poll (bus, GST_MESSAGE_ELEMENT, -1);
   structure = gst_message_get_structure (message);
   gst_structure_get_clock_time (structure, "timestamp", &ts1);

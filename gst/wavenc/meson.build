@@ -6,3 +6,5 @@ gstwavenc = library('gstwavenc',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstwavenc, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstwavenc]

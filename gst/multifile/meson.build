@@ -8,6 +8,7 @@ multifile_sources = [
   'gstsplitmuxsrc.c',
   'gstsplitutils.c',
   'patternspec.c',
+  'gstimagesequencesrc.c',
 ]
 
 gstmultifile = library('gstmultifile',
@@ -19,6 +20,8 @@ gstmultifile = library('gstmultifile',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstmultifile, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstmultifile]
 
 test_splitmuxpartreader_sources = [
   'test-splitmuxpartreader.c',

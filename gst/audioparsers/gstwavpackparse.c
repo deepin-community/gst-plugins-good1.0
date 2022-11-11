@@ -20,17 +20,17 @@
  */
 /**
  * SECTION:element-wavpackparse
+ * @title: wavpackparse
  * @short_description: Wavpack parser
  * @see_also: #GstAmrParse, #GstAACParse
  *
  * This is an Wavpack parser.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
  * |[
  * gst-launch-1.0 filesrc location=abc.wavpack ! wavpackparse ! wavpackdec ! audioresample ! audioconvert ! autoaudiosink
  * ]|
- * </refsect2>
+ *
  */
 
 #ifdef HAVE_CONFIG_H
@@ -61,7 +61,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("audio/x-wavpack"));
+    GST_STATIC_CAPS ("audio/x-wavpack; audio/x-wavpack-correction"));
 
 static void gst_wavpack_parse_finalize (GObject * object);
 
@@ -325,7 +325,9 @@ gst_wavpack_parse_frame_metadata (GstWavpackParse * parse, GstBuffer * buf,
     CHECK (gst_byte_reader_get_data (&br, size + (size & 1), &data));
     gst_byte_reader_init (&mbr, data, size);
 
-    switch (id) {
+    /* 0x1f is the metadata id mask and 0x20 flag is for later extensions
+     * that do not need to be handled by the decoder */
+    switch (id & 0x3f) {
       case ID_WVC_BITSTREAM:
         GST_LOG_OBJECT (parse, "correction bitstream");
         wpi->correction = TRUE;
@@ -701,6 +703,8 @@ gst_wavpack_parse_pre_push_frame (GstBaseParse * parse,
     /* also signals the end of first-frame processing */
     wavpackparse->sent_codec_tag = TRUE;
   }
+
+  frame->flags |= GST_BASE_PARSE_FRAME_FLAG_CLIP;
 
   return GST_FLOW_OK;
 }

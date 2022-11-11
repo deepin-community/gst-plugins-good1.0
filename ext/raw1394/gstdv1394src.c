@@ -21,23 +21,23 @@
  */
 /**
  * SECTION:element-dv1394src
+ * @title: dv1394src
  *
  * Read DV (digital video) data from firewire port.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
  * |[
  * gst-launch-1.0 dv1394src ! queue ! dvdemux name=d ! queue ! dvdec ! xvimagesink d. ! queue ! alsasink
  * ]| This pipeline captures from the firewire port and displays it (might need
  * format converters for audio/video).
- * </refsect2>
+ *
  */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 #include <unistd.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -171,8 +171,7 @@ gst_dv1394src_class_init (GstDV1394SrcClass * klass)
 
   gst_dv1394src_signals[SIGNAL_FRAME_DROPPED] =
       g_signal_new ("frame-dropped", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstDV1394SrcClass, frame_dropped),
-      NULL, NULL, g_cclosure_marshal_VOID__VOID, G_TYPE_NONE, 0);
+      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_PORT,
       g_param_spec_int ("port", "Port", "Port number (-1 automatic)",

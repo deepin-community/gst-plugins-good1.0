@@ -13,7 +13,10 @@ rtpmanager_sources = [
   'rtpsession.c',
   'rtpsource.c',
   'rtpstats.c',
+  'rtptimerqueue.c',
+  'rtptwcc.c',
   'gstrtpsession.c',
+  'gstrtpfunnel.c',
 ]
 
 gstrtpmanager = library('gstrtpmanager',
@@ -24,3 +27,5 @@ gstrtpmanager = library('gstrtpmanager',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstrtpmanager, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstrtpmanager]

@@ -117,23 +117,12 @@ gst_rtp_gst_depay_finalize (GObject * object)
 }
 
 static void
-store_cache (GstRtpGSTDepay * rtpgstdepay, guint CV, GstCaps * caps)
-{
-  if (rtpgstdepay->CV_cache[CV])
-    gst_caps_unref (rtpgstdepay->CV_cache[CV]);
-  rtpgstdepay->CV_cache[CV] = caps;
-}
-
-static void
 gst_rtp_gst_depay_reset (GstRtpGSTDepay * rtpgstdepay, gboolean full)
 {
-  guint i;
-
   gst_adapter_clear (rtpgstdepay->adapter);
   if (full) {
     rtpgstdepay->current_CV = 0;
-    for (i = 0; i < 8; i++)
-      store_cache (rtpgstdepay, i, NULL);
+    gst_caps_replace (&rtpgstdepay->current_caps, NULL);
     g_free (rtpgstdepay->stream_id);
     rtpgstdepay->stream_id = NULL;
     if (rtpgstdepay->tags)
@@ -182,14 +171,14 @@ gst_rtp_gst_depay_setcaps (GstRTPBaseDepayload * depayload, GstCaps * caps)
     }
     /* store in cache */
     rtpgstdepay->current_CV = CV;
-    gst_caps_ref (outcaps);
-    store_cache (rtpgstdepay, CV, outcaps);
+    gst_caps_replace (&rtpgstdepay->current_caps, outcaps);
 
     res = gst_pad_set_caps (depayload->srcpad, outcaps);
     gst_caps_unref (outcaps);
   } else {
     GST_WARNING_OBJECT (depayload, "no caps given");
     rtpgstdepay->current_CV = -1;
+    gst_caps_replace (&rtpgstdepay->current_caps, NULL);
     res = TRUE;
   }
 
@@ -464,7 +453,12 @@ gst_rtp_gst_depay_process (GstRTPBaseDepayload * depayload, GstRTPBuffer * rtp)
       GST_DEBUG_OBJECT (rtpgstdepay,
           "inline caps %u, length %u, %" GST_PTR_FORMAT, CV, size, outcaps);
 
-      store_cache (rtpgstdepay, CV, outcaps);
+      if (!rtpgstdepay->current_caps
+          || !gst_caps_is_strictly_equal (rtpgstdepay->current_caps, outcaps))
+        gst_pad_set_caps (depayload->srcpad, outcaps);
+      gst_caps_replace (&rtpgstdepay->current_caps, outcaps);
+      gst_caps_unref (outcaps);
+      rtpgstdepay->current_CV = CV;
 
       /* skip caps */
       offset += size;
@@ -504,17 +498,9 @@ gst_rtp_gst_depay_process (GstRTPBaseDepayload * depayload, GstRTPBuffer * rtp)
 
       /* see what caps we need */
       if (CV != rtpgstdepay->current_CV) {
-        /* we need to switch caps, check if we have the caps */
-        if ((outcaps = rtpgstdepay->CV_cache[CV]) == NULL)
-          goto missing_caps;
-
-        GST_DEBUG_OBJECT (rtpgstdepay,
-            "need caps switch from %u to %u, %" GST_PTR_FORMAT,
-            rtpgstdepay->current_CV, CV, outcaps);
-
-        /* and set caps */
-        if (gst_pad_set_caps (depayload->srcpad, outcaps))
-          rtpgstdepay->current_CV = CV;
+        /* we need to switch caps but didn't receive the new caps yet */
+        gst_caps_replace (&rtpgstdepay->current_caps, NULL);
+        goto missing_caps;
       }
 
       if (payload[0] & 0x8)

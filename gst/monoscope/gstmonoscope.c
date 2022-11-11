@@ -21,17 +21,17 @@
 
 /**
  * SECTION:element-monoscope
+ * @title: monoscope
  * @see_also: goom
  *
  * Monoscope is an audio visualisation element. It creates a coloured
  * curve of the audio signal like on an oscilloscope.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
  * |[
  * gst-launch-1.0 -v audiotestsrc ! audioconvert ! monoscope ! videoconvert ! ximagesink
  * ]|
- * </refsect2>
+ *
  */
 
 #ifdef HAVE_CONFIG_H
@@ -477,7 +477,7 @@ gst_monoscope_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
     case GST_EVENT_SEGMENT:
     {
       /* the newsegment values are used to clip the input samples
-       * and to convert the incomming timestamps to running time so
+       * and to convert the incoming timestamps to running time so
        * we can do QoS */
       gst_event_copy_segment (event, &monoscope->segment);
 
