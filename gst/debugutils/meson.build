@@ -6,6 +6,8 @@ gstnavigationtest = library('gstnavigationtest',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstnavigationtest, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstnavigationtest]
 
 gstdebug = library('gstdebug',
   'gstdebug.c',
@@ -25,3 +27,5 @@ gstdebug = library('gstdebug',
   install : true,
   install_dir : plugins_install_dir,
 )
+pkgconfig.generate(gstdebug, install_dir : plugins_pkgconfig_install_dir)
+plugins += [gstdebug]

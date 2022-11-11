@@ -21,21 +21,20 @@
 
 /**
  * SECTION:element-flacdec
+ * @title: flacdec
  * @see_also: #GstFlacEnc
  *
  * flacdec decodes FLAC streams.
- * <ulink url="http://flac.sourceforge.net/">FLAC</ulink>
- * is a Free Lossless Audio Codec.
+ * [FLAC](http://flac.sourceforge.net/) is a Free Lossless Audio Codec.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
  * |[
  * gst-launch-1.0 filesrc location=media/small/dark.441-16-s.flac ! flacparse ! flacdec ! audioconvert ! audioresample ! autoaudiosink
  * ]|
  * |[
  * gst-launch-1.0 souphttpsrc location=http://gstreamer.freedesktop.org/media/small/dark.441-16-s.flac ! flacparse ! flacdec ! audioconvert ! audioresample ! queue min-threshold-buffers=10 ! autoaudiosink
  * ]|
- * </refsect2>
+ *
  */
 
 #ifdef HAVE_CONFIG_H
@@ -238,6 +237,22 @@ gst_flac_dec_stop (GstAudioDecoder * dec)
   return TRUE;
 }
 
+static gint64
+gst_flac_dec_get_latency (GstFlacDec * flacdec)
+{
+  /* The FLAC specification states that the data is processed in blocks,
+   * regardless of the number of channels. Thus, The latency can be calculated
+   * using the blocksize and rate. For example a 1 second block sampled at
+   * 44.1KHz has a blocksize of 44100 */
+
+  /* Make sure the rate is valid */
+  if (!flacdec->info.rate)
+    return 0;
+
+  /* Calculate the latecy */
+  return (flacdec->max_blocksize * GST_SECOND) / flacdec->info.rate;
+}
+
 static gboolean
 gst_flac_dec_set_format (GstAudioDecoder * dec, GstCaps * caps)
 {
@@ -262,6 +277,9 @@ gst_flac_dec_set_format (GstAudioDecoder * dec, GstCaps * caps)
     GST_WARNING_OBJECT (dec, "unexpected data left in adapter");
     gst_adapter_clear (flacdec->adapter);
   }
+
+  FLAC__stream_decoder_reset (flacdec->decoder);
+  flacdec->got_headers = FALSE;
 
   num = gst_value_array_get_size (headers);
   for (i = 0; i < num; ++i) {
@@ -291,6 +309,7 @@ gst_flac_dec_set_format (GstAudioDecoder * dec, GstCaps * caps)
     }
   }
   GST_INFO_OBJECT (dec, "headers and metadata are now processed");
+
   return TRUE;
 }
 
@@ -447,7 +466,9 @@ gst_flac_dec_metadata_cb (const FLAC__StreamDecoder * decoder,
     const FLAC__StreamMetadata * metadata, void *client_data)
 {
   GstFlacDec *flacdec = GST_FLAC_DEC (client_data);
+  GstAudioDecoder *dec = GST_AUDIO_DECODER (client_data);
   GstAudioChannelPosition position[8];
+  guint64 curr_latency = 0, old_latency = gst_flac_dec_get_latency (flacdec);
 
   GST_LOG_OBJECT (flacdec, "metadata type: %d", metadata->type);
 
@@ -486,6 +507,11 @@ gst_flac_dec_metadata_cb (const FLAC__StreamDecoder * decoder,
           metadata->data.stream_info.sample_rate,
           metadata->data.stream_info.channels, position);
 
+      gst_audio_decoder_set_output_format (GST_AUDIO_DECODER (flacdec),
+          &flacdec->info);
+
+      gst_audio_decoder_negotiate (GST_AUDIO_DECODER (flacdec));
+
       GST_DEBUG_OBJECT (flacdec, "blocksize: min=%u, max=%u",
           flacdec->min_blocksize, flacdec->max_blocksize);
       GST_DEBUG_OBJECT (flacdec, "sample rate: %u, channels: %u",
@@ -499,6 +525,11 @@ gst_flac_dec_metadata_cb (const FLAC__StreamDecoder * decoder,
     default:
       break;
   }
+
+  /* Update the latency if it has changed */
+  curr_latency = gst_flac_dec_get_latency (flacdec);
+  if (old_latency != curr_latency)
+    gst_audio_decoder_set_latency (dec, curr_latency, curr_latency);
 }
 
 static void
@@ -625,10 +656,8 @@ gst_flac_dec_write (GstFlacDec * flacdec, const FLAC__Frame * frame,
     GST_DEBUG_OBJECT (flacdec, "Negotiating %d Hz @ %d channels", sample_rate,
         channels);
 
-    memcpy (chanpos, channel_positions[flacdec->info.channels - 1],
-        sizeof (chanpos));
-    gst_audio_channel_positions_to_valid_order (chanpos,
-        flacdec->info.channels);
+    memcpy (chanpos, channel_positions[channels - 1], sizeof (chanpos));
+    gst_audio_channel_positions_to_valid_order (chanpos, channels);
     gst_audio_info_set_format (&flacdec->info,
         gst_audio_format_build_integer (TRUE, G_BYTE_ORDER, width, gdepth),
         sample_rate, channels, chanpos);

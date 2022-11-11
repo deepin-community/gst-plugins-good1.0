@@ -103,9 +103,10 @@ typedef enum _AtomsTreeFlavor
 typedef struct _AtomsContext
 {
   AtomsTreeFlavor flavor;
+  gboolean force_create_timecode_trak;
 } AtomsContext;
 
-AtomsContext* atoms_context_new  (AtomsTreeFlavor flavor);
+AtomsContext* atoms_context_new  (AtomsTreeFlavor flavor, gboolean force_create_timecode_trak);
 void          atoms_context_free (AtomsContext *context);
 
 #define METADATA_DATA_FLAG 0x0
@@ -318,10 +319,18 @@ typedef struct _AtomGMHD
 {
   Atom header;
 
+  /* Only gmin is required in a gmhd atom
+   * The other fields are optional */
   AtomGMIN gmin;
-  AtomTMCD tmcd;
+  AtomTMCD *tmcd;
 
 } AtomGMHD;
+
+typedef struct _AtomNMHD
+{
+  Atom header;
+  guint32 flags;
+} AtomNMHD;
 
 typedef struct _AtomURL
 {
@@ -384,7 +393,8 @@ typedef enum _SampleEntryKind
   AUDIO,
   VIDEO,
   SUBTITLE,
-  TIMECODE
+  TIMECODE,
+  CLOSEDCAPTION
 } SampleEntryKind;
 
 typedef struct _SampleTableEntry
@@ -538,13 +548,17 @@ typedef struct _AtomTREF
 
 /*
  * used for both STCO and CO64
- * if used as STCO, entries should be truncated to use only 32bits
+ * The table will be written out as STCO automatically when
+ * the offsets being written will fit in a 32-bit table,
+ * otherwise it is written as CO64
  */
 typedef struct _AtomSTCO64
 {
   AtomFull header;
   /* Global offset to add to entries when serialising */
   guint32 chunk_offset;
+  /* Maximum offset stored in the table */
+  guint64 max_offset;
   ATOM_ARRAY (guint64) entries;
 } AtomSTCO64;
 
@@ -597,6 +611,7 @@ typedef struct _AtomMINF
   AtomSMHD *smhd;
   AtomHMHD *hmhd;
   AtomGMHD *gmhd;
+  AtomNMHD *nmhd;
 
   AtomHDLR *hdlr;
   AtomDINF dinf;
@@ -997,7 +1012,6 @@ guint64    atom_mfra_copy_data         (AtomMFRA *mfra, guint8 **buffer, guint64
 
 
 /* media sample description related helpers */
-
 typedef struct
 {
   guint16 version;
@@ -1053,6 +1067,9 @@ SampleTableEntryTX3G * atom_trak_set_subtitle_type (AtomTRAK * trak, AtomsContex
 
 SampleTableEntryTMCD *
 atom_trak_set_timecode_type (AtomTRAK * trak, AtomsContext * context, guint trak_timescale, GstVideoTimeCode * tc);
+
+SampleTableEntry * atom_trak_set_caption_type (AtomTRAK *trak, AtomsContext *context,
+					       guint32 trak_timescale, guint32 caption_type);
 
 void atom_trak_update_bitrates (AtomTRAK * trak, guint32 avg_bitrate,
                                 guint32 max_bitrate);

@@ -47,8 +47,11 @@
 #include "gstv4l2sink.h"
 #include "gstv4l2radio.h"
 #include "gstv4l2videodec.h"
+#include "gstv4l2fwhtenc.h"
 #include "gstv4l2h263enc.h"
 #include "gstv4l2h264enc.h"
+#include "gstv4l2h265enc.h"
+#include "gstv4l2jpegenc.h"
 #include "gstv4l2mpeg4enc.h"
 #include "gstv4l2vp8enc.h"
 #include "gstv4l2vp9enc.h"
@@ -125,6 +128,8 @@ gst_v4l2_probe_and_register (GstPlugin * plugin)
   struct v4l2_capability vcap;
   guint32 device_caps;
 
+  GST_DEBUG ("Probing devices");
+
   it = gst_v4l2_iterator_new ();
 
   while (gst_v4l2_iterator_next (it)) {
@@ -181,29 +186,45 @@ gst_v4l2_probe_and_register (GstPlugin * plugin)
 
     basename = g_path_get_basename (it->device_path);
 
+    /* Caps won't be freed if the subclass is not instantiated */
+    GST_MINI_OBJECT_FLAG_SET (sink_caps, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
+    GST_MINI_OBJECT_FLAG_SET (src_caps, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
+
     if (gst_v4l2_is_video_dec (sink_caps, src_caps)) {
       gst_v4l2_video_dec_register (plugin, basename, it->device_path,
-          sink_caps, src_caps);
+          video_fd, sink_caps, src_caps);
     } else if (gst_v4l2_is_video_enc (sink_caps, src_caps, NULL)) {
+      if (gst_v4l2_is_fwht_enc (sink_caps, src_caps))
+        gst_v4l2_fwht_enc_register (plugin, basename, it->device_path,
+            sink_caps, src_caps);
+
       if (gst_v4l2_is_h264_enc (sink_caps, src_caps))
         gst_v4l2_h264_enc_register (plugin, basename, it->device_path,
-            sink_caps, src_caps);
+            video_fd, sink_caps, src_caps);
+
+      if (gst_v4l2_is_h265_enc (sink_caps, src_caps))
+        gst_v4l2_h265_enc_register (plugin, basename, it->device_path,
+            video_fd, sink_caps, src_caps);
 
       if (gst_v4l2_is_mpeg4_enc (sink_caps, src_caps))
         gst_v4l2_mpeg4_enc_register (plugin, basename, it->device_path,
-            sink_caps, src_caps);
+            video_fd, sink_caps, src_caps);
 
       if (gst_v4l2_is_h263_enc (sink_caps, src_caps))
         gst_v4l2_h263_enc_register (plugin, basename, it->device_path,
             sink_caps, src_caps);
 
+      if (gst_v4l2_is_jpeg_enc (sink_caps, src_caps))
+        gst_v4l2_jpeg_enc_register (plugin, basename, it->device_path,
+            sink_caps, src_caps);
+
       if (gst_v4l2_is_vp8_enc (sink_caps, src_caps))
         gst_v4l2_vp8_enc_register (plugin, basename, it->device_path,
-            sink_caps, src_caps);
+            video_fd, sink_caps, src_caps);
 
       if (gst_v4l2_is_vp9_enc (sink_caps, src_caps))
         gst_v4l2_vp9_enc_register (plugin, basename, it->device_path,
-            sink_caps, src_caps);
+            video_fd, sink_caps, src_caps);
     } else if (gst_v4l2_is_transform (sink_caps, src_caps)) {
       gst_v4l2_transform_register (plugin, basename, it->device_path,
           sink_caps, src_caps);
@@ -232,7 +253,7 @@ plugin_init (GstPlugin * plugin)
 
   GST_DEBUG_CATEGORY_INIT (v4l2_debug, "v4l2", 0, "V4L2 API calls");
 
-  /* Add some depedency, so the dynamic features get updated upon changes in
+  /* Add some dependency, so the dynamic features get updated upon changes in
    * /dev/video* */
   gst_plugin_add_dependency (plugin,
       NULL, paths, names, GST_PLUGIN_DEPENDENCY_FLAG_FILE_NAME_IS_PREFIX);

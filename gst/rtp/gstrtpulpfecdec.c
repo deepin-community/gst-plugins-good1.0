@@ -26,23 +26,34 @@
  * Generic Forward Error Correction (FEC) decoder for Uneven Level
  * Protection (ULP) as described in RFC 5109.
  *
+ * It differs from the RFC in one important way, it multiplexes the
+ * FEC packets in the same sequence number as media packets. This is to be
+ * compatible with libwebrtc as using in Google Chrome and with Microsoft
+ * Lync / Skype for Business.
+ *
  * This element will work in combination with an upstream #GstRtpStorage
  * element and attempt to recover packets declared lost through custom
  * 'GstRTPPacketLost' events, usually emitted by #GstRtpJitterBuffer.
  *
- * As such, this element cannot be usefully used from the command line,
- * because a reference to the upstream storage object needs to be
- * provided to it through its #GstRtpUlpFecDec:storage property, example
- * programs are available at
- * <https://github.com/sdroege/gstreamer-rs/blob/master/examples/src/bin/rtpfecserver.rs>
- * and
- * <https://github.com/sdroege/gstreamer-rs/blob/master/examples/src/bin/rtpfecclient.rs>.
+ * If no storage is provided using the #GstRtpUlpFecDec:storage
+ * property, it will try to get it from an element upstream.
  *
  * Additionally, the payload types of the protection packets *must* be
  * provided to this element via its #GstRtpUlpFecDec:pt property.
  *
  * When using #GstRtpBin, this element should be inserted through the
  * #GstRtpBin::request-fec-decoder signal.
+ *
+ * ## Example pipeline
+ *
+ * |[
+ * gst-launch-1.0 udpsrc port=8888 caps="application/x-rtp, payload=96, clock-rate=90000" ! rtpstorage size-time=220000000 ! rtpssrcdemux ! application/x-rtp, payload=96, clock-rate=90000, media=video, encoding-name=H264 ! rtpjitterbuffer do-lost=1 latency=200 !  rtpulpfecdec pt=122 ! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink
+ * ]| This example will receive a stream with FEC and try to reconstruct the packets.
+ *
+ * Example programs are available at
+ * <https://gitlab.freedesktop.org/gstreamer/gstreamer-rs/blob/master/examples/src/bin/rtpfecserver.rs>
+ * and
+ * <https://gitlab.freedesktop.org/gstreamer/gstreamer-rs/blob/master/examples/src/bin/rtpfecclient.rs>
  *
  * See also: #GstRtpUlpFecEnc, #GstRtpBin, #GstRtpStorage
  * Since: 1.14
@@ -134,7 +145,7 @@ gst_rtp_ulpfec_dec_start (GstRtpUlpFecDec * self, GstBufferList * buflist,
       GST_LOG_RTP_PACKET (self, "rtp header (incoming)", &info->rtp);
 
       if (lost_seq == gst_rtp_buffer_get_seq (&info->rtp)) {
-        GST_DEBUG_OBJECT (self, "Received lost packet from from the storage");
+        GST_DEBUG_OBJECT (self, "Received lost packet from the storage");
         g_list_free (self->info_media);
         self->info_media = NULL;
         self->lost_packet_from_storage = TRUE;
@@ -363,11 +374,18 @@ gst_rtp_ulpfec_dec_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
   GstRtpUlpFecDec *self = GST_RTP_ULPFEC_DEC (parent);
 
   if (G_LIKELY (GST_FLOW_OK == self->chain_return_val)) {
+    GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
+    buf = gst_buffer_make_writable (buf);
+
     if (G_UNLIKELY (self->unset_discont_flag)) {
       self->unset_discont_flag = FALSE;
-      buf = gst_buffer_make_writable (buf);
       GST_BUFFER_FLAG_UNSET (buf, GST_BUFFER_FLAG_DISCONT);
     }
+
+    gst_rtp_buffer_map (buf, GST_MAP_WRITE, &rtp);
+    gst_rtp_buffer_set_seq (&rtp, self->next_seqnum++);
+    gst_rtp_buffer_unmap (&rtp);
+
     return gst_pad_push (self->srcpad, buf);
   }
 
@@ -396,6 +414,9 @@ gst_rtp_ulpfec_dec_handle_packet_loss (GstRtpUlpFecDec * self, guint16 seqnum,
             gst_rtp_ulpfec_dec_recover (self, self->caps_ssrc, caps_pt,
                 &recovered_pt, &recovered_seq))) {
       if (seqnum == recovered_seq) {
+        GstBuffer *sent_buffer;
+        GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
+
         recovered_buffer = gst_buffer_make_writable (recovered_buffer);
         GST_BUFFER_PTS (recovered_buffer) = timestamp;
         /* GST_BUFFER_DURATION (recovered_buffer) = duration;
@@ -403,21 +424,33 @@ gst_rtp_ulpfec_dec_handle_packet_loss (GstRtpUlpFecDec * self, guint16 seqnum,
 
         if (!self->lost_packet_from_storage)
           rtp_storage_put_recovered_packet (self->storage,
-              gst_buffer_ref (recovered_buffer), recovered_pt, self->caps_ssrc,
-              recovered_seq);
+              recovered_buffer, recovered_pt, self->caps_ssrc, recovered_seq);
 
         GST_DEBUG_OBJECT (self,
             "Pushing recovered packet ssrc=0x%08x seq=%u %" GST_PTR_FORMAT,
             self->caps_ssrc, seqnum, recovered_buffer);
 
+        sent_buffer = gst_buffer_copy_deep (recovered_buffer);
+
+        if (self->lost_packet_from_storage)
+          gst_buffer_unref (recovered_buffer);
+
+        gst_rtp_buffer_map (sent_buffer, GST_MAP_WRITE, &rtp);
+        gst_rtp_buffer_set_seq (&rtp, self->next_seqnum++);
+        gst_rtp_buffer_unmap (&rtp);
+
         ret = FALSE;
         self->unset_discont_flag = TRUE;
-        self->chain_return_val = gst_pad_push (self->srcpad, recovered_buffer);
+        self->chain_return_val = gst_pad_push (self->srcpad, sent_buffer);
         break;
       }
 
-      rtp_storage_put_recovered_packet (self->storage,
-          recovered_buffer, recovered_pt, self->caps_ssrc, recovered_seq);
+      if (!self->lost_packet_from_storage) {
+        rtp_storage_put_recovered_packet (self->storage,
+            recovered_buffer, recovered_pt, self->caps_ssrc, recovered_seq);
+      } else {
+        gst_buffer_unref (recovered_buffer);
+      }
     }
 
     gst_rtp_ulpfec_dec_stop (self);
@@ -444,11 +477,34 @@ gst_rtp_ulpfec_dec_handle_sink_event (GstPad * pad, GstObject * parent,
       gst_event_has_name (event, "GstRTPPacketLost")) {
     guint seqnum;
     GstClockTime timestamp, duration;
+    GstStructure *s;
+
+    event = gst_event_make_writable (event);
+    s = gst_event_writable_structure (event);
 
     g_assert (self->have_caps_ssrc);
-    g_assert (self->storage);
 
-    if (!gst_structure_get (gst_event_get_structure (event),
+    if (self->storage == NULL) {
+      GstQuery *q = gst_query_new_custom (GST_QUERY_CUSTOM,
+          gst_structure_new_empty ("GstRtpStorage"));
+
+      if (gst_pad_peer_query (self->sinkpad, q)) {
+        const GstStructure *s = gst_query_get_structure (q);
+
+        if (gst_structure_has_field_typed (s, "storage", G_TYPE_OBJECT)) {
+          gst_structure_get (s, "storage", G_TYPE_OBJECT, &self->storage, NULL);
+        }
+      }
+      gst_query_unref (q);
+    }
+
+    if (self->storage == NULL) {
+      GST_ELEMENT_WARNING (self, STREAM, FAILED, ("Internal storage not found"),
+          ("You need to add rtpstorage element upstream from rtpulpfecdec."));
+      return FALSE;
+    }
+
+    if (!gst_structure_get (s,
             "seqnum", G_TYPE_UINT, &seqnum,
             "timestamp", G_TYPE_UINT64, &timestamp,
             "duration", G_TYPE_UINT64, &duration, NULL))
@@ -457,10 +513,15 @@ gst_rtp_ulpfec_dec_handle_sink_event (GstPad * pad, GstObject * parent,
     forward =
         gst_rtp_ulpfec_dec_handle_packet_loss (self, seqnum, timestamp,
         duration);
-    if (forward)
+
+    if (forward) {
+      gst_structure_remove_field (s, "seqnum");
+      gst_structure_set (s, "might-have-been-fec", G_TYPE_BOOLEAN, TRUE, NULL);
       ++self->packets_unrecovered;
-    else
+    } else {
       ++self->packets_recovered;
+    }
+
     GST_DEBUG_OBJECT (self, "Unrecovered / Recovered: %lu / %lu",
         (gulong) self->packets_unrecovered, (gulong) self->packets_recovered);
   } else if (GST_EVENT_CAPS == GST_EVENT_TYPE (event)) {
@@ -513,6 +574,8 @@ gst_rtp_ulpfec_dec_init (GstRtpUlpFecDec * self)
   gst_element_add_pad (GST_ELEMENT (self), self->sinkpad);
 
   self->fec_pt = DEFAULT_FEC_PT;
+
+  self->next_seqnum = g_random_int_range (0, G_MAXINT16);
 
   self->chain_return_val = GST_FLOW_OK;
   self->have_caps_ssrc = FALSE;

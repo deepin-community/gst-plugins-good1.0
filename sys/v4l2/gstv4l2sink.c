@@ -24,12 +24,12 @@
 
 /**
  * SECTION:element-v4l2sink
+ * @title: v4l2sink
  *
  * v4l2sink can be used to display video to v4l2 devices (screen overlays
  * provided by the graphics hardware, tv-out, etc)
  *
- * <refsect2>
- * <title>Example launch lines</title>
+ * ## Example launch lines
  * |[
  * gst-launch-1.0 videotestsrc ! v4l2sink device=/dev/video1
  * ]| This pipeline displays a test pattern on /dev/video1
@@ -45,7 +45,7 @@
  * original video frame geometry so that the box can be drawn to the correct
  * position. This also handles borders correctly, limiting coordinates to the
  * image area
- * </refsect2>
+ *
  */
 
 
@@ -437,6 +437,7 @@ gst_v4l2sink_change_state (GstElement * element, GstStateChange transition)
 {
   GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
   GstV4l2Sink *v4l2sink = GST_V4L2SINK (element);
+  GstV4l2Error error = GST_V4L2_ERROR_INIT;
 
   GST_DEBUG_OBJECT (v4l2sink, "%d -> %d",
       GST_STATE_TRANSITION_CURRENT (transition),
@@ -445,8 +446,10 @@ gst_v4l2sink_change_state (GstElement * element, GstStateChange transition)
   switch (transition) {
     case GST_STATE_CHANGE_NULL_TO_READY:
       /* open the device */
-      if (!gst_v4l2_object_open (v4l2sink->v4l2object))
+      if (!gst_v4l2_object_open (v4l2sink->v4l2object, &error)) {
+        gst_v4l2_error (v4l2sink, &error);
         return GST_STATE_CHANGE_FAILURE;
+      }
       break;
     default:
       break;
@@ -556,7 +559,7 @@ gst_v4l2sink_propose_allocation (GstBaseSink * bsink, GstQuery * query)
 
   g_object_get (bsink, "enable-last-sample", &last_sample_enabled, NULL);
 
-  if (last_sample_enabled) {
+  if (last_sample_enabled && gst_query_get_n_allocation_pools (query) > 0) {
     GstBufferPool *pool;
     guint size, min, max;
 
@@ -568,7 +571,8 @@ gst_v4l2sink_propose_allocation (GstBaseSink * bsink, GstQuery * query)
       max = min;
 
     gst_query_set_nth_allocation_pool (query, 0, pool, size, min, max);
-    gst_object_unref (pool);
+    if (pool)
+      gst_object_unref (pool);
   }
 
   return TRUE;

@@ -43,7 +43,7 @@ G_BEGIN_DECLS
 
 /* This flow return is used to indicated that the last buffer of a
  * drain or a resoltuion change has been found. This should normally
- * only occure for mem-2-mem devices. */
+ * only occur for mem-2-mem devices. */
 #define GST_V4L2_FLOW_LAST_BUFFER GST_FLOW_CUSTOM_SUCCESS
 
 /* This flow return is used to indicated that the returned buffer was marked
@@ -64,6 +64,8 @@ struct _GstV4l2BufferPool
   gboolean empty;
   GCond empty_cond;
 
+  gboolean orphaned;
+
   GstV4l2Allocator *vallocator;
   GstAllocator *allocator;
   GstAllocationParams params;
@@ -77,6 +79,7 @@ struct _GstV4l2BufferPool
   guint min_latency;         /* number of buffers we will hold */
   guint max_latency;         /* number of buffers we can hold */
   guint num_queued;          /* number of buffers queued in the driver */
+  guint num_allocated;       /* number of buffers allocated */
   guint copy_threshold;      /* when our pool runs lower, start handing out copies */
 
   gboolean streaming;
@@ -108,6 +111,8 @@ void                gst_v4l2_buffer_pool_copy_at_threshold (GstV4l2BufferPool * 
                                                             gboolean copy);
 
 gboolean            gst_v4l2_buffer_pool_flush   (GstBufferPool *pool);
+
+gboolean            gst_v4l2_buffer_pool_orphan  (GstBufferPool ** pool);
 
 G_END_DECLS
 
