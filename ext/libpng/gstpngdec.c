@@ -37,7 +37,7 @@
 #include <gst/video/video.h>
 #include <gst/video/gstvideometa.h>
 #include <gst/video/gstvideopool.h>
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 
 GST_DEBUG_CATEGORY_STATIC (pngdec_debug);
 #define GST_CAT_DEFAULT pngdec_debug
@@ -62,6 +62,8 @@ static gboolean gst_pngdec_sink_event (GstVideoDecoder * bdec,
 
 #define parent_class gst_pngdec_parent_class
 G_DEFINE_TYPE (GstPngDec, gst_pngdec, GST_TYPE_VIDEO_DECODER);
+GST_ELEMENT_REGISTER_DEFINE (pngdec, "pngdec", GST_RANK_PRIMARY,
+    GST_TYPE_PNGDEC);
 
 static GstStaticPadTemplate gst_pngdec_src_pad_template =
 GST_STATIC_PAD_TEMPLATE ("src",
@@ -248,7 +250,7 @@ gst_pngdec_caps_create_and_set (GstPngDec * pngdec)
 
   /* Add alpha channel if 16-bit depth, but not for GRAY images */
   if ((bpc > 8) && (color_type != PNG_COLOR_TYPE_GRAY)) {
-    png_set_add_alpha (pngdec->png, 0xffff, PNG_FILLER_BEFORE);
+    png_set_add_alpha (pngdec->png, 0xffff, PNG_FILLER_AFTER);
     png_set_swap (pngdec->png);
   }
 #if 0
@@ -354,7 +356,7 @@ gst_pngdec_caps_create_and_set (GstPngDec * pngdec)
         &icc_compression_type, &icc_profile, &icc_proflen);
 
     if ((ret & PNG_INFO_iCCP)) {
-      gpointer gst_icc_prof = g_memdup (icc_profile, icc_proflen);
+      gpointer gst_icc_prof = g_memdup2 (icc_profile, icc_proflen);
       GstBuffer *tagbuffer = NULL;
       GstSample *tagsample = NULL;
       GstTagList *taglist = NULL;

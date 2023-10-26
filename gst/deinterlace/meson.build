@@ -65,8 +65,6 @@ if have_nasm and host_cpu == 'x86_64'
     asm_outformat = 'win64'
   elif ['darwin', 'ios'].contains(host_system)
     asm_outformat = 'macho64'
-  elif host_system.endswith('bsd')
-    asm_outformat = 'aoutb'
   else
     asm_outformat = 'elf64'
   endif
@@ -98,6 +96,5 @@ gstdeinterlace = library('gstdeinterlace',
   install : true,
   install_dir : plugins_install_dir,
 )
-pkgconfig.generate(gstdeinterlace, install_dir : plugins_pkgconfig_install_dir)
 plugins += [gstdeinterlace]
 

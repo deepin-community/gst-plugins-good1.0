@@ -62,6 +62,8 @@
 
 #include "gstvideocrop.h"
 #include "gstaspectratiocrop.h"
+/* include private header which contains the supported formats */
+#include "gstvideocrop-private.h"
 
 #include <string.h>
 
@@ -77,13 +79,6 @@ enum
   PROP_BOTTOM
 };
 
-/* we support the same caps as aspectratiocrop (sync changes) */
-#define VIDEO_CROP_CAPS                                \
-  GST_VIDEO_CAPS_MAKE ("{ RGBx, xRGB, BGRx, xBGR, "    \
-      "RGBA, ARGB, BGRA, ABGR, RGB, BGR, AYUV, YUY2, Y444, " \
-      "Y42B, Y41B, YVYU, UYVY, I420, YV12, RGB16, RGB15, "  \
-      "GRAY8, NV12, NV21, GRAY16_LE, GRAY16_BE }")
-
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
@@ -98,6 +93,8 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
 
 #define gst_video_crop_parent_class parent_class
 G_DEFINE_TYPE (GstVideoCrop, gst_video_crop, GST_TYPE_VIDEO_FILTER);
+GST_ELEMENT_REGISTER_DEFINE (videocrop, "videocrop", GST_RANK_NONE,
+    GST_TYPE_VIDEO_CROP);
 
 static void gst_video_crop_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -126,48 +123,32 @@ static GstFlowReturn gst_video_crop_transform_ip (GstBaseTransform * trans,
 static gboolean
 gst_video_crop_src_event (GstBaseTransform * trans, GstEvent * event)
 {
-  GstEvent *new_event;
-  GstStructure *new_structure;
-  const GstStructure *structure;
-  const gchar *event_name;
-  double pointer_x;
-  double pointer_y;
+  double x, y, new_x, new_y;
 
   GstVideoCrop *vcrop = GST_VIDEO_CROP (trans);
-  new_event = NULL;
-
   GST_OBJECT_LOCK (vcrop);
-  if (GST_EVENT_TYPE (event) == GST_EVENT_NAVIGATION &&
-      (vcrop->crop_left != 0 || vcrop->crop_top != 0)) {
-    structure = gst_event_get_structure (event);
-    event_name = gst_structure_get_string (structure, "event");
 
-    if (event_name &&
-        (strcmp (event_name, "mouse-move") == 0 ||
-            strcmp (event_name, "mouse-button-press") == 0 ||
-            strcmp (event_name, "mouse-button-release") == 0)) {
+  switch (GST_EVENT_TYPE (event)) {
+    case GST_EVENT_NAVIGATION:
+      if ((vcrop->crop_left != 0 || vcrop->crop_top != 0)
+          && gst_navigation_event_get_coordinates (event, &x, &y)) {
 
-      if (gst_structure_get_double (structure, "pointer_x", &pointer_x) &&
-          gst_structure_get_double (structure, "pointer_y", &pointer_y)) {
+        new_x = x + vcrop->crop_left;
+        new_y = y + vcrop->crop_top;
 
-        new_structure = gst_structure_copy (structure);
-        gst_structure_set (new_structure,
-            "pointer_x", G_TYPE_DOUBLE, (double) (pointer_x + vcrop->crop_left),
-            "pointer_y", G_TYPE_DOUBLE, (double) (pointer_y + vcrop->crop_top),
-            NULL);
+        event = gst_event_make_writable (event);
 
-        new_event = gst_event_new_navigation (new_structure);
-        gst_event_unref (event);
-      } else {
-        GST_WARNING_OBJECT (vcrop, "Failed to read navigation event");
+        GST_TRACE_OBJECT (vcrop, "from %fx%f to %fx%f", x, y, new_x, new_y);
+        gst_navigation_event_set_coordinates (event, new_x, new_y);
       }
-    }
+      break;
+    default:
+      break;
   }
 
   GST_OBJECT_UNLOCK (vcrop);
 
-  return GST_BASE_TRANSFORM_CLASS (parent_class)->src_event (trans,
-      (new_event ? new_event : event));
+  return GST_BASE_TRANSFORM_CLASS (parent_class)->src_event (trans, event);
 }
 
 static void
@@ -235,16 +216,16 @@ gst_video_crop_class_init (GstVideoCropClass * klass)
 static void
 gst_video_crop_init (GstVideoCrop * vcrop)
 {
+  GST_DEBUG_CATEGORY_INIT (videocrop_debug, "videocrop", 0, "videocrop");
+
   vcrop->crop_right = 0;
   vcrop->crop_left = 0;
   vcrop->crop_top = 0;
   vcrop->crop_bottom = 0;
 }
 
-#define ROUND_DOWN_2(n)  ((n)&(~1))
-
 static void
-gst_video_crop_transform_packed_complex (GstVideoCrop * vcrop,
+gst_video_crop_transform_packed_yvyu (GstVideoCrop * vcrop,
     GstVideoFrame * in_frame, GstVideoFrame * out_frame, gint x, gint y)
 {
   guint8 *in_data, *out_data;
@@ -266,7 +247,7 @@ gst_video_crop_transform_packed_complex (GstVideoCrop * vcrop,
 
   /* rounding down here so we end up at the start of a macro-pixel and not
    * in the middle of one */
-  in_data += ROUND_DOWN_2 (vcrop->crop_left) *
+  in_data += GST_ROUND_DOWN_2 (vcrop->crop_left) *
       GST_VIDEO_FRAME_COMP_PSTRIDE (in_frame, 0);
 
   dx = width * GST_VIDEO_FRAME_COMP_PSTRIDE (out_frame, 0);
@@ -293,6 +274,41 @@ gst_video_crop_transform_packed_complex (GstVideoCrop * vcrop,
       in_data += in_stride;
       out_data += out_stride;
     }
+  }
+}
+
+static void
+gst_video_crop_transform_packed_v210 (GstVideoCrop * vcrop,
+    GstVideoFrame * in_frame, GstVideoFrame * out_frame, gint x, gint y)
+{
+  guint8 *in_data, *out_data;
+  guint i, dx;
+  gint width, height;
+  gint in_stride;
+  gint out_stride;
+
+  width = GST_VIDEO_FRAME_WIDTH (out_frame);
+  height = GST_VIDEO_FRAME_HEIGHT (out_frame);
+
+  in_data = GST_VIDEO_FRAME_PLANE_DATA (in_frame, 0);
+  out_data = GST_VIDEO_FRAME_PLANE_DATA (out_frame, 0);
+
+  in_stride = GST_VIDEO_FRAME_PLANE_STRIDE (in_frame, 0);
+  out_stride = GST_VIDEO_FRAME_PLANE_STRIDE (out_frame, 0);
+
+  in_data += vcrop->crop_top * in_stride;
+
+  /* rounding down here so we end up at the start of a macro-pixel and not
+   * in the middle of one */
+  in_data += (vcrop->crop_left / 6) * 16;
+
+  /* copy a whole set of macro-pixels */
+  dx = ((width + 5) / 6) * 16;
+
+  for (i = 0; i < height; ++i) {
+    memcpy (out_data, in_data, dx);
+    in_data += in_stride;
+    out_data += out_stride;
   }
 }
 
@@ -345,10 +361,15 @@ gst_video_crop_transform_planar (GstVideoCrop * vcrop,
     guint subsampled_crop_left, subsampled_crop_top;
     guint copy_width;
     gint i;
+    gsize bytes_per_pixel;
 
     /* plane */
     plane_in = GST_VIDEO_FRAME_PLANE_DATA (in_frame, p);
     plane_out = GST_VIDEO_FRAME_PLANE_DATA (out_frame, p);
+
+    /* To support > 8bit, we need to add a byte-multiplier that specifies
+     * how many bytes are used per pixel value */
+    bytes_per_pixel = GST_VIDEO_FRAME_COMP_PSTRIDE (in_frame, p);
 
     /* apply crop top/left
      * crop_top and crop_left have to be rounded down to the corresponding
@@ -365,8 +386,9 @@ gst_video_crop_transform_planar (GstVideoCrop * vcrop,
         subsampled_crop_top) * GST_VIDEO_FRAME_PLANE_STRIDE (in_frame, p);
     plane_in +=
         GST_VIDEO_FORMAT_INFO_SCALE_WIDTH (format_info, p,
-        subsampled_crop_left);
-    copy_width = (guint) GST_VIDEO_FRAME_COMP_WIDTH (out_frame, p);
+        subsampled_crop_left) * bytes_per_pixel;
+    copy_width = GST_VIDEO_FRAME_COMP_WIDTH (out_frame, p) * bytes_per_pixel;
+
 
     for (i = 0; i < GST_VIDEO_FRAME_COMP_HEIGHT (out_frame, p); ++i) {
       memcpy (plane_out, plane_in, copy_width);
@@ -443,9 +465,11 @@ gst_video_crop_transform_frame (GstVideoFilter * vfilter,
     case VIDEO_CROP_PIXEL_FORMAT_PACKED_SIMPLE:
       gst_video_crop_transform_packed_simple (vcrop, in_frame, out_frame, x, y);
       break;
-    case VIDEO_CROP_PIXEL_FORMAT_PACKED_COMPLEX:
-      gst_video_crop_transform_packed_complex (vcrop, in_frame, out_frame, x,
-          y);
+    case VIDEO_CROP_PIXEL_FORMAT_PACKED_YVYU:
+      gst_video_crop_transform_packed_yvyu (vcrop, in_frame, out_frame, x, y);
+      break;
+    case VIDEO_CROP_PIXEL_FORMAT_PACKED_v210:
+      gst_video_crop_transform_packed_v210 (vcrop, in_frame, out_frame, x, y);
       break;
     case VIDEO_CROP_PIXEL_FORMAT_PLANAR:
       gst_video_crop_transform_planar (vcrop, in_frame, out_frame, x, y);
@@ -479,10 +503,14 @@ gst_video_crop_decide_allocation (GstBaseTransform * trans, GstQuery * query)
     GST_INFO_OBJECT (crop, "we are doing in-place transform using crop meta");
     gst_base_transform_set_passthrough (GST_BASE_TRANSFORM (crop), FALSE);
     gst_base_transform_set_in_place (GST_BASE_TRANSFORM (crop), TRUE);
-  } else {
+  } else if (crop->raw_caps) {
     GST_INFO_OBJECT (crop, "we are not using passthrough");
     gst_base_transform_set_passthrough (GST_BASE_TRANSFORM (crop), FALSE);
     gst_base_transform_set_in_place (GST_BASE_TRANSFORM (crop), FALSE);
+  } else {
+    GST_ELEMENT_ERROR (crop, STREAM, WRONG_TYPE,
+        ("Dowstream doesn't support crop for non-raw caps"), (NULL));
+    return FALSE;
   }
 
   return GST_BASE_TRANSFORM_CLASS (parent_class)->decide_allocation (trans,
@@ -692,8 +720,10 @@ gst_video_crop_transform_caps (GstBaseTransform * trans,
     const GValue *v;
     GstStructure *structure, *new_structure;
     GValue w_val = G_VALUE_INIT, h_val = G_VALUE_INIT;
+    GstCapsFeatures *features;
 
     structure = gst_caps_get_structure (caps, i);
+    features = gst_caps_get_features (caps, i);
 
     v = gst_structure_get_value (structure, "width");
     if (!gst_video_crop_transform_dimension_value (v, dx, &w_val, direction,
@@ -717,9 +747,13 @@ gst_video_crop_transform_caps (GstBaseTransform * trans,
     gst_structure_set_value (new_structure, "height", &h_val);
     g_value_unset (&w_val);
     g_value_unset (&h_val);
+
     GST_LOG_OBJECT (vcrop, "transformed structure %2d: %" GST_PTR_FORMAT
-        " => %" GST_PTR_FORMAT, i, structure, new_structure);
+        " => %" GST_PTR_FORMAT "features %" GST_PTR_FORMAT, i, structure,
+        new_structure, features);
     gst_caps_append_structure (other_caps, new_structure);
+
+    gst_caps_set_features (other_caps, i, gst_caps_features_copy (features));
   }
 
   if (!gst_caps_is_empty (other_caps) && filter_caps) {
@@ -737,6 +771,7 @@ gst_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
     GstVideoInfo * in_info, GstCaps * out, GstVideoInfo * out_info)
 {
   GstVideoCrop *crop = GST_VIDEO_CROP (vfilter);
+  GstCapsFeatures *features;
   int dx, dy;
 
   GST_OBJECT_LOCK (crop);
@@ -786,42 +821,94 @@ gst_video_crop_set_info (GstVideoFilter * vfilter, GstCaps * in,
     GST_LOG_OBJECT (crop, "incaps = %" GST_PTR_FORMAT ", outcaps = %"
         GST_PTR_FORMAT, in, out);
 
-  if (GST_VIDEO_INFO_IS_RGB (in_info)
-      || GST_VIDEO_INFO_IS_GRAY (in_info)) {
-    crop->packing = VIDEO_CROP_PIXEL_FORMAT_PACKED_SIMPLE;
-  } else {
-    switch (GST_VIDEO_INFO_FORMAT (in_info)) {
-      case GST_VIDEO_FORMAT_AYUV:
-        crop->packing = VIDEO_CROP_PIXEL_FORMAT_PACKED_SIMPLE;
-        break;
-      case GST_VIDEO_FORMAT_YVYU:
-      case GST_VIDEO_FORMAT_YUY2:
-      case GST_VIDEO_FORMAT_UYVY:
-        crop->packing = VIDEO_CROP_PIXEL_FORMAT_PACKED_COMPLEX;
-        if (GST_VIDEO_INFO_FORMAT (in_info) == GST_VIDEO_FORMAT_UYVY) {
-          /* UYVY = 4:2:2 - [U0 Y0 V0 Y1] [U2 Y2 V2 Y3] [U4 Y4 V4 Y5] */
-          crop->macro_y_off = 1;
-        } else {
-          /* YUYV = 4:2:2 - [Y0 U0 Y1 V0] [Y2 U2 Y3 V2] [Y4 U4 Y5 V4] = YUY2 */
-          crop->macro_y_off = 0;
-        }
-        break;
-      case GST_VIDEO_FORMAT_I420:
-      case GST_VIDEO_FORMAT_YV12:
-      case GST_VIDEO_FORMAT_Y444:
-      case GST_VIDEO_FORMAT_Y42B:
-      case GST_VIDEO_FORMAT_Y41B:
-        crop->packing = VIDEO_CROP_PIXEL_FORMAT_PLANAR;
-        break;
-      case GST_VIDEO_FORMAT_NV12:
-      case GST_VIDEO_FORMAT_NV21:
-        crop->packing = VIDEO_CROP_PIXEL_FORMAT_SEMI_PLANAR;
-        break;
-      default:
-        goto unknown_format;
-    }
+  if (in) {
+    features = gst_caps_get_features (in, 0);
+    crop->raw_caps = gst_caps_features_is_equal (features,
+        GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY);
   }
 
+  if (!crop->raw_caps)
+    goto beach;
+
+  switch (GST_VIDEO_INFO_FORMAT (in_info)) {
+    case GST_VIDEO_FORMAT_RGB:
+    case GST_VIDEO_FORMAT_BGR:
+    case GST_VIDEO_FORMAT_RGB16:
+    case GST_VIDEO_FORMAT_RGB15:
+    case GST_VIDEO_FORMAT_RGBx:
+    case GST_VIDEO_FORMAT_xRGB:
+    case GST_VIDEO_FORMAT_BGRx:
+    case GST_VIDEO_FORMAT_xBGR:
+    case GST_VIDEO_FORMAT_RGBA:
+    case GST_VIDEO_FORMAT_ARGB:
+    case GST_VIDEO_FORMAT_BGRA:
+    case GST_VIDEO_FORMAT_ABGR:
+    case GST_VIDEO_FORMAT_GRAY8:
+    case GST_VIDEO_FORMAT_GRAY16_LE:
+    case GST_VIDEO_FORMAT_GRAY16_BE:
+    case GST_VIDEO_FORMAT_AYUV:
+      crop->packing = VIDEO_CROP_PIXEL_FORMAT_PACKED_SIMPLE;
+      break;
+    case GST_VIDEO_FORMAT_YVYU:
+    case GST_VIDEO_FORMAT_YUY2:
+    case GST_VIDEO_FORMAT_UYVY:
+      crop->packing = VIDEO_CROP_PIXEL_FORMAT_PACKED_YVYU;
+      if (GST_VIDEO_INFO_FORMAT (in_info) == GST_VIDEO_FORMAT_UYVY) {
+        /* UYVY = 4:2:2 - [U0 Y0 V0 Y1] [U2 Y2 V2 Y3] [U4 Y4 V4 Y5] */
+        crop->macro_y_off = 1;
+      } else {
+        /* YUYV = 4:2:2 - [Y0 U0 Y1 V0] [Y2 U2 Y3 V2] [Y4 U4 Y5 V4] = YUY2 */
+        crop->macro_y_off = 0;
+      }
+      break;
+    case GST_VIDEO_FORMAT_v210:
+      crop->packing = VIDEO_CROP_PIXEL_FORMAT_PACKED_v210;
+      break;
+    case GST_VIDEO_FORMAT_I420:
+    case GST_VIDEO_FORMAT_I420_10BE:
+    case GST_VIDEO_FORMAT_I420_10LE:
+    case GST_VIDEO_FORMAT_I420_12BE:
+    case GST_VIDEO_FORMAT_I420_12LE:
+    case GST_VIDEO_FORMAT_A420:
+    case GST_VIDEO_FORMAT_A420_10BE:
+    case GST_VIDEO_FORMAT_A420_10LE:
+    case GST_VIDEO_FORMAT_YV12:
+    case GST_VIDEO_FORMAT_Y444:
+    case GST_VIDEO_FORMAT_Y444_10BE:
+    case GST_VIDEO_FORMAT_Y444_10LE:
+    case GST_VIDEO_FORMAT_Y444_12BE:
+    case GST_VIDEO_FORMAT_Y444_12LE:
+    case GST_VIDEO_FORMAT_A444_10BE:
+    case GST_VIDEO_FORMAT_A444_10LE:
+    case GST_VIDEO_FORMAT_Y42B:
+    case GST_VIDEO_FORMAT_I422_10BE:
+    case GST_VIDEO_FORMAT_I422_10LE:
+    case GST_VIDEO_FORMAT_A422_10BE:
+    case GST_VIDEO_FORMAT_A422_10LE:
+    case GST_VIDEO_FORMAT_I422_12BE:
+    case GST_VIDEO_FORMAT_I422_12LE:
+    case GST_VIDEO_FORMAT_GBR:
+    case GST_VIDEO_FORMAT_GBR_10BE:
+    case GST_VIDEO_FORMAT_GBR_10LE:
+    case GST_VIDEO_FORMAT_GBR_12BE:
+    case GST_VIDEO_FORMAT_GBR_12LE:
+    case GST_VIDEO_FORMAT_GBRA:
+    case GST_VIDEO_FORMAT_GBRA_10BE:
+    case GST_VIDEO_FORMAT_GBRA_10LE:
+    case GST_VIDEO_FORMAT_GBRA_12BE:
+    case GST_VIDEO_FORMAT_GBRA_12LE:
+    case GST_VIDEO_FORMAT_Y41B:
+      crop->packing = VIDEO_CROP_PIXEL_FORMAT_PLANAR;
+      break;
+    case GST_VIDEO_FORMAT_NV12:
+    case GST_VIDEO_FORMAT_NV21:
+      crop->packing = VIDEO_CROP_PIXEL_FORMAT_SEMI_PLANAR;
+      break;
+    default:
+      goto unknown_format;
+  }
+
+beach:
   crop->in_info = *in_info;
   crop->out_info = *out_info;
 
@@ -923,23 +1010,3 @@ gst_video_crop_get_property (GObject * object, guint prop_id, GValue * value,
   }
   GST_OBJECT_UNLOCK (video_crop);
 }
-
-static gboolean
-plugin_init (GstPlugin * plugin)
-{
-  GST_DEBUG_CATEGORY_INIT (videocrop_debug, "videocrop", 0, "videocrop");
-
-  if (gst_element_register (plugin, "videocrop", GST_RANK_NONE,
-          GST_TYPE_VIDEO_CROP)
-      && gst_element_register (plugin, "aspectratiocrop", GST_RANK_NONE,
-          GST_TYPE_ASPECT_RATIO_CROP))
-    return TRUE;
-
-  return FALSE;
-}
-
-GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
-    GST_VERSION_MINOR,
-    videocrop,
-    "Crops video into a user-defined region",
-    plugin_init, VERSION, GST_LICENSE, GST_PACKAGE_NAME, GST_PACKAGE_ORIGIN)
