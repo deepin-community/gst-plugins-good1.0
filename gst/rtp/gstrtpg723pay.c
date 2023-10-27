@@ -28,6 +28,7 @@
 #include <gst/base/gstadapter.h>
 #include <gst/audio/audio.h>
 
+#include "gstrtpelements.h"
 #include "gstrtpg723pay.h"
 #include "gstrtputils.h"
 
@@ -68,6 +69,8 @@ static GstStateChangeReturn gst_rtp_g723_pay_change_state (GstElement * element,
 
 #define gst_rtp_g723_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRTPG723Pay, gst_rtp_g723_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtpg723pay, "rtpg723pay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_G723_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_g723_pay_class_init (GstRTPG723PayClass * klass)
@@ -161,6 +164,7 @@ gst_rtp_g723_pay_flush (GstRTPG723Pay * pay)
   /* set discont and marker */
   if (pay->discont) {
     GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_DISCONT);
+    GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
     gst_rtp_buffer_set_marker (&rtp, TRUE);
     pay->discont = FALSE;
   }
@@ -297,12 +301,4 @@ gst_rtp_g723_pay_change_state (GstElement * element, GstStateChange transition)
   }
 
   return ret;
-}
-
-/*Plugin init functions*/
-gboolean
-gst_rtp_g723_pay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtpg723pay", GST_RANK_SECONDARY,
-      gst_rtp_g723_pay_get_type ());
 }

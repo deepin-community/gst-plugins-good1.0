@@ -21,17 +21,15 @@
  * SECTION:element-gdkpixbufoverlay
  * @title: gdkpixbufoverlay
  *
- * The gdkpixbufoverlay element overlays an image loaded from file onto
- * a video stream.
+ * The gdkpixbufoverlay element overlays a provided GdkPixbuf or an image
+ * loaded from file onto a video stream.
  *
  * Changing the positioning or overlay width and height properties at runtime
  * is supported, but it might be prudent to to protect the property setting
  * code with GST_BASE_TRANSFORM_LOCK and GST_BASE_TRANSFORM_UNLOCK, as
  * g_object_set() is not atomic for multiple properties passed in one go.
  *
- * Changing the image at runtime is currently not supported.
- *
- * Negative offsets are also not yet supported.
+ * Changing the image at runtime is supported.
  *
  * ## Example launch line
  * |[
@@ -49,6 +47,7 @@
 #include <gst/gst.h>
 #include "gstgdkpixbufoverlay.h"
 
+#include "gstgdkpixbufelements.h"
 #include <gst/video/gstvideometa.h>
 
 GST_DEBUG_CATEGORY_STATIC (gdkpixbufoverlay_debug);
@@ -113,6 +112,9 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
 
 G_DEFINE_TYPE (GstGdkPixbufOverlay, gst_gdk_pixbuf_overlay,
     GST_TYPE_VIDEO_FILTER);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (gdkpixbufoverlay, "gdkpixbufoverlay",
+    GST_RANK_NONE, GST_TYPE_GDK_PIXBUF_OVERLAY,
+    gdk_pixbuf_element_init (plugin));
 
 #define GST_TYPE_GDK_PIXBUF_POSITIONING_MODE \
     (gst_gdk_pixbuf_positioning_mode_get_type())

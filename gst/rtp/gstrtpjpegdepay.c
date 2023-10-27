@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gstrtpelements.h"
 #include "gstrtpjpegdepay.h"
 #include "gstrtputils.h"
 
@@ -70,6 +71,8 @@ static GstStaticPadTemplate gst_rtp_jpeg_depay_sink_template =
 #define gst_rtp_jpeg_depay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpJPEGDepay, gst_rtp_jpeg_depay,
     GST_TYPE_RTP_BASE_DEPAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtpjpegdepay, "rtpjpegdepay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_JPEG_DEPAY, rtp_element_init (plugin));
 
 static void gst_rtp_jpeg_depay_finalize (GObject * object);
 
@@ -702,7 +705,7 @@ gst_rtp_jpeg_depay_process (GstRTPBaseDepayload * depayload, GstRTPBuffer * rtp)
      * marker */
     gst_adapter_copy (rtpjpegdepay->adapter, end, avail - 2, 2);
 
-    if (end[0] != 0xff && end[1] != 0xd9) {
+    if (GST_READ_UINT16_BE (end) != 0xffd9) {
       GST_DEBUG_OBJECT (rtpjpegdepay, "no EOI marker, adding one");
 
       /* no EOI marker, add one */
@@ -789,12 +792,4 @@ gst_rtp_jpeg_depay_change_state (GstElement * element,
       break;
   }
   return ret;
-}
-
-
-gboolean
-gst_rtp_jpeg_depay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtpjpegdepay",
-      GST_RANK_SECONDARY, GST_TYPE_RTP_JPEG_DEPAY);
 }

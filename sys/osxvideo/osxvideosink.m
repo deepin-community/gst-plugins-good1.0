@@ -301,11 +301,9 @@ gst_osx_video_sink_osxwindow_destroy (GstOSXVideoSink * osxvideosink)
   g_return_if_fail (GST_IS_OSX_VIDEO_SINK (osxvideosink));
   pool = [[NSAutoreleasePool alloc] init];
 
-  GST_OBJECT_LOCK (osxvideosink);
   gst_osx_video_sink_call_from_main_thread(osxvideosink,
       osxvideosink->osxvideosinkobject,
       @selector(destroy), (id) nil, YES);
-  GST_OBJECT_UNLOCK (osxvideosink);
 #ifndef GSTREAMER_GLIB_COCOA_NSAPPLICATION
   gst_osx_video_sink_stop_cocoa_loop (osxvideosink);
 #endif
@@ -525,8 +523,8 @@ gst_osx_video_sink_base_init (gpointer g_class)
 {
   GstElementClass *element_class = GST_ELEMENT_CLASS (g_class);
 
-  gst_element_class_set_static_metadata (element_class, "OSX Video sink",
-      "Sink/Video", "OSX native videosink",
+  gst_element_class_set_static_metadata (element_class, "macOS Video sink",
+      "Sink/Video", "macOS native videosink",
       "Zaheer Abbas Merali <zaheerabbas at merali dot org>");
 
   gst_element_class_add_static_pad_template (element_class, &gst_osx_video_sink_sink_template_factory);
@@ -573,23 +571,9 @@ gst_osx_video_sink_class_init (GstOSXVideoSinkClass * klass)
   gstbasesink_class->propose_allocation = gst_osx_video_sink_propose_allocation;
   gstelement_class->change_state = gst_osx_video_sink_change_state;
 
-  /**
-   * GstOSXVideoSink:embed
-   *
-   * For ABI comatibility only, do not use
-   *
-   **/
-
   g_object_class_install_property (gobject_class, ARG_EMBED,
       g_param_spec_boolean ("embed", "embed", "For ABI compatibility only, do not use",
           FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-  /**
-   * GstOSXVideoSink:force-aspect-ratio
-   *
-   * When enabled, scaling will respect original aspect ratio.
-   *
-   **/
 
   g_object_class_install_property (gobject_class, ARG_FORCE_PAR,
       g_param_spec_boolean ("force-aspect-ratio", "force aspect ration",
@@ -870,7 +854,7 @@ gst_osx_video_sink_get_type (void)
 - (void) showFrame: (GstBufferObject *) object
 {
   GstVideoFrame frame;
-  guint8 *data, *readp, *writep;
+  guint8 *readp, *writep;
   gint i, active_width, stride;
   guint8 *texture_buffer;
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -887,7 +871,7 @@ gst_osx_video_sink_get_type (void)
   if (!gst_video_frame_map (&frame, &osxvideosink->info, buf, GST_MAP_READ))
       goto no_map;
 
-  data = readp = GST_VIDEO_FRAME_PLANE_DATA (&frame, 0);
+  readp = GST_VIDEO_FRAME_PLANE_DATA (&frame, 0);
   stride = GST_VIDEO_FRAME_PLANE_STRIDE (&frame, 0);
   writep = texture_buffer;
   active_width = GST_VIDEO_SINK_WIDTH (osxvideosink) * sizeof (short);
@@ -928,6 +912,7 @@ no_texture_buffer:
 
   pool = [[NSAutoreleasePool alloc] init];
 
+  GST_OBJECT_LOCK (osxvideosink);
   osxwindow = osxvideosink->osxwindow;
   osxvideosink->osxwindow = NULL;
 
@@ -945,6 +930,8 @@ no_texture_buffer:
     }
     g_free (osxwindow);
   }
+  GST_OBJECT_UNLOCK (osxvideosink);
+  
   [pool release];
 }
 

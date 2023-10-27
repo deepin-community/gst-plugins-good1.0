@@ -31,7 +31,6 @@
 #include "gstqtglutility.h"
 
 #include <QtCore/QDateTime>
-#include <QtCore/QRunnable>
 #include <QtGui/QGuiApplication>
 #include <QtQuick/QQuickWindow>
 #include <QOpenGLFramebufferObject>
@@ -70,6 +69,7 @@ struct _QtGLWindowPrivate
 
   GstGLDisplay *display;
   GstGLContext *other_context;
+  GstGLContext *context;
 
   GLuint fbo;
 
@@ -78,26 +78,6 @@ struct _QtGLWindowPrivate
   quint64 start;
   quint64 stop;
 };
-
-class InitQtGLContext : public QRunnable
-{
-public:
-  InitQtGLContext(QtGLWindow *window);
-  void run();
-
-private:
-  QtGLWindow *window_;
-};
-
-InitQtGLContext::InitQtGLContext(QtGLWindow *window) :
-  window_(window)
-{
-}
-
-void InitQtGLContext::run()
-{
-  window_->onSceneGraphInitialized();
-}
 
 QtGLWindow::QtGLWindow ( QWindow * parent, QQuickWindow *src ) :
   QQuickWindow( parent ), source (src)
@@ -117,13 +97,13 @@ QtGLWindow::QtGLWindow ( QWindow * parent, QQuickWindow *src ) :
   g_mutex_init (&this->priv->lock);
   g_cond_init (&this->priv->update_cond);
 
-  this->priv->display = gst_qt_get_gl_display();
+  this->priv->display = gst_qt_get_gl_display(FALSE);
 
   connect (source, SIGNAL(beforeRendering()), this, SLOT(beforeRendering()), Qt::DirectConnection);
   connect (source, SIGNAL(afterRendering()), this, SLOT(afterRendering()), Qt::DirectConnection);
   connect (app, SIGNAL(aboutToQuit()), this, SLOT(aboutToQuit()), Qt::DirectConnection);
   if (source->isSceneGraphInitialized())
-    source->scheduleRenderJob(new InitQtGLContext(this), QQuickWindow::BeforeSynchronizingStage);
+    source->scheduleRenderJob(new RenderJob(std::bind(&QtGLWindow::onSceneGraphInitialized, this)), QQuickWindow::BeforeSynchronizingStage);
   else
     connect (source, SIGNAL(sceneGraphInitialized()), this, SLOT(onSceneGraphInitialized()), Qt::DirectConnection);
 
@@ -141,6 +121,10 @@ QtGLWindow::~QtGLWindow()
     gst_object_unref(this->priv->other_context);
   if (this->priv->display)
     gst_object_unref(this->priv->display);
+  if (this->priv->context)
+    gst_object_unref(this->priv->context);
+  if (this->priv->caps)
+      gst_caps_unref(this->priv->caps);
   g_free (this->priv);
   this->priv = NULL;
 }
@@ -166,7 +150,7 @@ QtGLWindow::beforeRendering()
     GST_DEBUG ("create new framebuffer object %dX%d", width, height);
 
     fbo.reset(new QOpenGLFramebufferObject (width, height,
-          QOpenGLFramebufferObject::NoAttachment, GL_TEXTURE_2D, GL_RGBA));
+          QOpenGLFramebufferObject::CombinedDepthStencil, GL_TEXTURE_2D, GL_RGBA));
 
     source->setRenderTarget(fbo.data());
   } else if (this->priv->useDefaultFbo) {
@@ -189,6 +173,7 @@ QtGLWindow::afterRendering()
   guint width, height;
   const GstGLFuncs *gl;
   GLuint dst_tex;
+  GstGLSyncMeta *sync_meta;
 
   g_mutex_lock (&this->priv->lock);
 
@@ -253,18 +238,32 @@ QtGLWindow::afterRendering()
     gl->CopyTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, width, height, 0);
   }
 
-  GST_DEBUG ("rendering finished");
-
-errors:
   gl->BindFramebuffer (GL_FRAMEBUFFER, 0);
   gst_video_frame_unmap (&gl_frame);
 
+  if (this->priv->context) {
+    sync_meta = gst_buffer_get_gl_sync_meta (this->priv->buffer);
+    if (!sync_meta) {
+      sync_meta = gst_buffer_add_gl_sync_meta (this->priv->context, this->priv->buffer);
+    }
+    gst_gl_sync_meta_set_sync_point (sync_meta, context);
+  }
+
+  GST_DEBUG ("rendering finished");
+
+done:
   gst_gl_context_activate (context, FALSE);
 
   this->priv->result = ret;
   this->priv->updated = TRUE;
   g_cond_signal (&this->priv->update_cond);
   g_mutex_unlock (&this->priv->lock);
+  return;
+
+errors:
+  gl->BindFramebuffer (GL_FRAMEBUFFER, 0);
+  gst_video_frame_unmap (&gl_frame);
+  goto done;
 }
 
 void
@@ -293,7 +292,7 @@ QtGLWindow::onSceneGraphInitialized()
       this->source->openglContext ());
 
   this->priv->initted = gst_qt_get_gl_wrapcontext (this->priv->display,
-      &this->priv->other_context, NULL);
+      &this->priv->other_context, &this->priv->context);
 
   if (this->priv->initted && this->priv->other_context) {
     const GstGLFuncs *gl;
@@ -333,8 +332,12 @@ QtGLWindow::getGeometry(int * width, int * height)
   if (width == NULL || height == NULL)
     return FALSE;
 
-  *width = this->source->width();
-  *height = this->source->height();
+  double scale = this->source->effectiveDevicePixelRatio();
+  *width = this->source->width() * scale;
+  *height = this->source->height() * scale;
+
+  GST_LOG("Window width %d height %d scale %f", *width, *height,
+      scale);
 
   return TRUE;
 }
@@ -359,6 +362,30 @@ qt_window_get_display (QtGLWindow * qt_window)
     return NULL;
 
   return (GstGLDisplay *) gst_object_ref (qt_window->priv->display);
+}
+
+GstGLContext *
+qt_window_get_context (QtGLWindow * qt_window)
+{
+  g_return_val_if_fail (qt_window != NULL, NULL);
+
+  if (!qt_window->priv->context)
+    return NULL;
+
+  return (GstGLContext *) gst_object_ref (qt_window->priv->context);
+}
+
+gboolean
+qt_window_set_context (QtGLWindow * qt_window, GstGLContext * context)
+{
+  g_return_val_if_fail (qt_window != NULL, FALSE);
+
+  if (qt_window->priv->context && qt_window->priv->context != context)
+    return FALSE;
+
+  gst_object_replace ((GstObject **) &qt_window->priv->context, (GstObject *) context);
+
+  return TRUE;
 }
 
 gboolean
@@ -434,4 +461,16 @@ qt_window_use_default_fbo (QtGLWindow * qt_window, gboolean useDefaultFbo)
   qt_window->priv->useDefaultFbo = useDefaultFbo;
 
   g_mutex_unlock (&qt_window->priv->lock);
+}
+
+void
+qt_window_stop(QtGLWindow* qt_window)
+{
+  g_mutex_lock(&qt_window->priv->lock);
+
+  GST_DEBUG("stop window");
+  qt_window->priv->updated = TRUE;
+  g_cond_signal(&qt_window->priv->update_cond);
+
+  g_mutex_unlock(&qt_window->priv->lock);
 }

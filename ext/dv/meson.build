@@ -1,12 +1,13 @@
 dv_sources = [
   'gstdv.c',
+  'gstdvelement.c',
   'gstdvdec.c',
   'gstdvdemux.c',
   'gstsmptetimecode.c',
-  'smpte_test.c',
 ]
 
-dv_dep = dependency('libdv', version : '>= 0.100', required : get_option('dv'))
+dv_dep = dependency('libdv', version : '>= 0.100', required : get_option('dv'),
+  fallback: ['dv', 'dv_dep'])
 
 if dv_dep.found()
   gstdv = library('gstdv',
@@ -17,7 +18,6 @@ if dv_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstdv, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstdv]
   # FIXME
   #executable('smpte_test',

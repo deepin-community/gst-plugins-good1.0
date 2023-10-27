@@ -65,9 +65,22 @@ struct _GstV4l2Src
 
   gboolean pending_set_fmt;
 
+  guint crop_top;
+  guint crop_left;
+  guint crop_bottom;
+  guint crop_right;
+
+  struct v4l2_rect crop_bounds;
+
+  gboolean apply_crop_settings;
+  struct v4l2_rect crop_rect;
+
   /* Timestamp sanity check */
   GstClockTime last_timestamp;
   gboolean has_bad_timestamp;
+
+  /* maintain signal status, updated during negotiation */
+  gboolean no_signal;
 };
 
 struct _GstV4l2SrcClass

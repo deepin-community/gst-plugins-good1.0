@@ -26,9 +26,11 @@
  * silence is signalled by bus messages named
  * `cutter`.
  *
- * The message's structure contains two fields:
+ * The message's structure contains these fields:
  *
  * * #GstClockTime `timestamp`: the timestamp of the buffer that triggered the message.
+ * * #GstClockTime `stream-time`: the stream time of the buffer.
+ * * #GstClockTime `running-time`: the running time of the buffer.
  * * gboolean `above`: %TRUE for begin of silence and %FALSE for end of silence.
  *
  * ## Example launch line
@@ -84,6 +86,7 @@ enum
 
 #define gst_cutter_parent_class parent_class
 G_DEFINE_TYPE (GstCutter, gst_cutter, GST_TYPE_ELEMENT);
+GST_ELEMENT_REGISTER_DEFINE (cutter, "cutter", GST_RANK_NONE, GST_TYPE_CUTTER);
 
 static GstStateChangeReturn
 gst_cutter_change_state (GstElement * element, GstStateChange transition);
@@ -160,6 +163,8 @@ gst_cutter_init (GstCutter * filter)
   gst_pad_use_fixed_caps (filter->srcpad);
   gst_element_add_pad (GST_ELEMENT (filter), filter->srcpad);
 
+  gst_segment_init (&filter->segment, GST_FORMAT_UNDEFINED);
+
   filter->threshold_level = CUTTER_DEFAULT_THRESHOLD_LEVEL;
   filter->threshold_length = CUTTER_DEFAULT_THRESHOLD_LENGTH;
   filter->silent_run_length = 0 * GST_SECOND;
@@ -176,10 +181,18 @@ static GstMessage *
 gst_cutter_message_new (GstCutter * c, gboolean above, GstClockTime timestamp)
 {
   GstStructure *s;
+  GstClockTime running_time, stream_time;
+
+  running_time = gst_segment_to_running_time (&c->segment, GST_FORMAT_TIME,
+      timestamp);
+  stream_time = gst_segment_to_stream_time (&c->segment, GST_FORMAT_TIME,
+      timestamp);
 
   s = gst_structure_new ("cutter",
       "above", G_TYPE_BOOLEAN, above,
-      "timestamp", GST_TYPE_CLOCK_TIME, timestamp, NULL);
+      "timestamp", G_TYPE_UINT64, timestamp,
+      "stream-time", G_TYPE_UINT64, stream_time,
+      "running-time", G_TYPE_UINT64, running_time, NULL);
 
   return gst_message_new_element (GST_OBJECT (c), s);
 }
@@ -262,6 +275,15 @@ gst_cutter_event (GstPad * pad, GstObject * parent, GstEvent * event)
       gst_event_parse_caps (event, &caps);
       ret = gst_cutter_setcaps (filter, caps);
       gst_event_unref (event);
+      break;
+    }
+    case GST_EVENT_SEGMENT:
+    {
+      const GstSegment *segment;
+
+      gst_event_parse_segment (event, &segment);
+      gst_segment_copy_into (segment, &filter->segment);
+      ret = gst_pad_event_default (pad, parent, event);
       break;
     }
     default:
@@ -487,10 +509,7 @@ gst_cutter_get_property (GObject * object, guint prop_id,
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  if (!gst_element_register (plugin, "cutter", GST_RANK_NONE, GST_TYPE_CUTTER))
-    return FALSE;
-
-  return TRUE;
+  return GST_ELEMENT_REGISTER (cutter, plugin);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

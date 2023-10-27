@@ -46,7 +46,7 @@
 #endif
 
 #include "gstmultifilesrc.h"
-
+#include <glib/gi18n-lib.h>
 
 static GstFlowReturn gst_multi_file_src_create (GstPushSrc * src,
     GstBuffer ** buffer);
@@ -90,7 +90,8 @@ enum
 G_DEFINE_TYPE_WITH_CODE (GstMultiFileSrc, gst_multi_file_src, GST_TYPE_PUSH_SRC,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
         gst_multi_file_src_uri_handler_init));
-
+GST_ELEMENT_REGISTER_DEFINE (multifilesrc, "multifilesrc", GST_RANK_NONE,
+    gst_multi_file_src_get_type ());
 
 static gboolean
 is_seekable (GstBaseSrc * src)
@@ -342,6 +343,7 @@ gst_multi_file_src_set_property (GObject * object, guint prop_id,
         src->fps_n = -1;
         src->fps_d = -1;
       }
+      gst_caps_unref (new_caps);
     }
       break;
     case PROP_LOOP:
@@ -390,7 +392,12 @@ gst_multi_file_src_get_filename (GstMultiFileSrc * multifilesrc)
   gchar *filename;
 
   GST_DEBUG ("%d", multifilesrc->index);
-  filename = g_strdup_printf (multifilesrc->filename, multifilesrc->index);
+  if (multifilesrc->filename != NULL) {
+    filename = g_strdup_printf (multifilesrc->filename, multifilesrc->index);
+  } else {
+    GST_WARNING_OBJECT (multifilesrc, "No filename location set!");
+    filename = NULL;
+  }
 
   return filename;
 }
@@ -421,6 +428,9 @@ gst_multi_file_src_create (GstPushSrc * src, GstBuffer ** buffer)
   }
 
   filename = gst_multi_file_src_get_filename (multifilesrc);
+
+  if (!filename)
+    goto error_no_filename;
 
   GST_DEBUG_OBJECT (multifilesrc, "reading from file \"%s\".", filename);
 
@@ -470,6 +480,12 @@ gst_multi_file_src_create (GstPushSrc * src, GstBuffer ** buffer)
   *buffer = buf;
   return GST_FLOW_OK;
 
+error_no_filename:
+  {
+    GST_ELEMENT_ERROR (multifilesrc, RESOURCE, NOT_FOUND,
+        (_("No file name specified for reading.")), (NULL));
+    return GST_FLOW_ERROR;
+  }
 handle_error:
   {
     if (error != NULL) {

@@ -42,6 +42,7 @@
 #include <gst/rtp/gstrtpbuffer.h>
 #include <gst/audio/audio.h>
 
+#include "gstrtpelements.h"
 #include "gstrtpac3pay.h"
 #include "gstrtputils.h"
 
@@ -81,6 +82,8 @@ static GstFlowReturn gst_rtp_ac3_pay_handle_buffer (GstRTPBasePayload * payload,
 
 #define gst_rtp_ac3_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpAC3Pay, gst_rtp_ac3_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtpac3pay, "rtpac3pay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_AC3_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_ac3_pay_class_init (GstRtpAC3PayClass * klass)
@@ -319,8 +322,10 @@ gst_rtp_ac3_pay_flush (GstRtpAC3Pay * rtpac3pay)
     payload[1] = NF;
     payload_len -= 2;
 
-    if (avail == payload_len)
+    if (avail == payload_len) {
       gst_rtp_buffer_set_marker (&rtp, TRUE);
+      GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
+    }
     gst_rtp_buffer_unmap (&rtp);
 
     payload_buffer =
@@ -469,11 +474,4 @@ gst_rtp_ac3_pay_change_state (GstElement * element, GstStateChange transition)
       break;
   }
   return ret;
-}
-
-gboolean
-gst_rtp_ac3_pay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtpac3pay",
-      GST_RANK_SECONDARY, GST_TYPE_RTP_AC3_PAY);
 }

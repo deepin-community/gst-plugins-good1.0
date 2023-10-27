@@ -64,6 +64,7 @@ struct _GstCutter
   gboolean leaky;               /* do we leak an overflowing prebuffer ? */
 
   GstAudioInfo info;
+  GstSegment segment;
 };
 
 struct _GstCutterClass
@@ -74,6 +75,8 @@ struct _GstCutterClass
 };
 
 GType gst_cutter_get_type (void);
+
+GST_ELEMENT_REGISTER_DECLARE (cutter);
 
 #ifdef __cplusplus
 }

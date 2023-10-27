@@ -40,6 +40,7 @@
 #include <string.h>
 #include <gst/rtp/gstrtpbuffer.h>
 #include <gst/video/video.h>
+#include "gstrtpelements.h"
 #include "gstrtpj2kcommon.h"
 #include "gstrtpj2kpay.h"
 #include "gstrtputils.h"
@@ -97,6 +98,8 @@ static GstFlowReturn gst_rtp_j2k_pay_handle_buffer (GstRTPBasePayload * pad,
 
 #define gst_rtp_j2k_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpJ2KPay, gst_rtp_j2k_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtpj2kpay, "rtpj2kpay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_J2K_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_j2k_pay_class_init (GstRtpJ2KPayClass * klass)
@@ -440,7 +443,9 @@ gst_rtp_j2k_pay_handle_buffer (GstRTPBasePayload * basepayload,
       data_size = payload_size - GST_RTP_J2K_HEADER_SIZE;
 
       /* make buffer for header */
-      outbuf = gst_rtp_buffer_new_allocate (GST_RTP_J2K_HEADER_SIZE, 0, 0);
+      outbuf =
+          gst_rtp_base_payload_allocate_output_buffer (basepayload,
+          GST_RTP_J2K_HEADER_SIZE, 0, 0);
 
       GST_BUFFER_PTS (outbuf) = timestamp;
 
@@ -454,6 +459,7 @@ gst_rtp_j2k_pay_handle_buffer (GstRTPBasePayload * basepayload,
       /* reached the end of a packetization unit */
       if (pu_size == 0 && end >= map.size) {
         gst_rtp_buffer_set_marker (&rtp, TRUE);
+        GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
       }
       /* If we were processing a header, see if all fits in one RTP packet
          or if we have to fragment it */
@@ -559,11 +565,4 @@ gst_rtp_j2k_pay_get_property (GObject * object, guint prop_id,
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
-}
-
-gboolean
-gst_rtp_j2k_pay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtpj2kpay", GST_RANK_SECONDARY,
-      GST_TYPE_RTP_J2K_PAY);
 }

@@ -1,6 +1,7 @@
 matroska_sources = [
   'ebml-read.c',
   'ebml-write.c',
+  'gstmatroskaelement.c',
   'matroska.c',
   'matroska-demux.c',
   'matroska-parse.c',
@@ -25,5 +26,4 @@ gstmatroska = library('gstmatroska',
   install : true,
   install_dir : plugins_install_dir,
 )
-pkgconfig.generate(gstmatroska, install_dir : plugins_pkgconfig_install_dir)
 plugins += [gstmatroska]

@@ -26,6 +26,7 @@
 #include <gst/rtp/gstrtpbuffer.h>
 #include <gst/video/video.h>
 
+#include "gstrtpelements.h"
 #include "gstrtpmp4vpay.h"
 #include "gstrtputils.h"
 
@@ -81,6 +82,12 @@ static gboolean gst_rtp_mp4v_pay_sink_event (GstRTPBasePayload * pay,
 
 #define gst_rtp_mp4v_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpMP4VPay, gst_rtp_mp4v_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+/* Note: This element is marked at a "+1" rank to make sure that
+ * auto-plugging of payloaders for MPEG4 elementary streams don't
+ * end up using the 'rtpmp4gpay' element (generic mpeg4) which isn't
+ * as well supported as this RFC */
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtpmp4vpay, "rtpmp4vpay",
+    GST_RANK_SECONDARY + 1, GST_TYPE_RTP_MP4V_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_mp4v_pay_class_init (GstRtpMP4VPayClass * klass)
@@ -278,7 +285,9 @@ gst_rtp_mp4v_pay_flush (GstRtpMP4VPay * rtpmp4vpay)
 
     /* create buffer without payload. The payload will be put
      * in next buffer instead. Both buffers will be merged */
-    outbuf = gst_rtp_buffer_new_allocate (0, 0, 0);
+    outbuf =
+        gst_rtp_base_payload_allocate_output_buffer (GST_RTP_BASE_PAYLOAD
+        (rtpmp4vpay), 0, 0, 0);
 
     /* Take buffer with the payload from the adapter */
     outbuf_data = gst_adapter_take_buffer_fast (rtpmp4vpay->adapter,
@@ -288,6 +297,8 @@ gst_rtp_mp4v_pay_flush (GstRtpMP4VPay * rtpmp4vpay)
 
     gst_rtp_buffer_map (outbuf, GST_MAP_WRITE, &rtp);
     gst_rtp_buffer_set_marker (&rtp, avail == 0);
+    if (avail == 0)
+      GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
     gst_rtp_buffer_unmap (&rtp);
     gst_rtp_copy_video_meta (rtpmp4vpay, outbuf, outbuf_data);
     outbuf = gst_buffer_append (outbuf, outbuf_data);
@@ -628,15 +639,4 @@ gst_rtp_mp4v_pay_get_property (GObject * object, guint prop_id,
     default:
       break;
   }
-}
-
-gboolean
-gst_rtp_mp4v_pay_plugin_init (GstPlugin * plugin)
-{
-  /* Note: This element is marked at a "+1" rank to make sure that
-   * auto-plugging of payloaders for MPEG4 elementary streams don't
-   * end up using the 'rtpmp4gpay' element (generic mpeg4) which isn't
-   * as well supported as this RFC */
-  return gst_element_register (plugin, "rtpmp4vpay",
-      GST_RANK_SECONDARY + 1, GST_TYPE_RTP_MP4V_PAY);
 }

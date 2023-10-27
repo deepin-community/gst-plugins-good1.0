@@ -52,6 +52,7 @@
 #include "config.h"
 #endif
 
+#include "gstaudioparserselements.h"
 #include "gstflacparse.h"
 
 #include <string.h>
@@ -216,6 +217,8 @@ static gboolean gst_flac_parse_set_sink_caps (GstBaseParse * parse,
 
 #define gst_flac_parse_parent_class parent_class
 G_DEFINE_TYPE (GstFlacParse, gst_flac_parse, GST_TYPE_BASE_PARSE);
+GST_ELEMENT_REGISTER_DEFINE (flacparse, "flacparse",
+    GST_RANK_PRIMARY + 1, GST_TYPE_FLAC_PARSE);
 
 static void
 gst_flac_parse_class_init (GstFlacParseClass * klass)
@@ -374,7 +377,7 @@ gst_flac_parse_stop (GstBaseParse * parse)
   return TRUE;
 }
 
-static const guint8 sample_size_table[] = { 0, 8, 12, 0, 16, 20, 24, 0 };
+static const guint8 sample_size_table[] = { 0, 8, 12, 0, 16, 20, 24, 32 };
 
 static const guint16 blocksize_table[16] = {
   0, 192, 576 << 0, 576 << 1, 576 << 2, 576 << 3, 0, 0,
@@ -446,7 +449,7 @@ gst_flac_parse_frame_header_is_valid (GstFlacParse * flacparse,
 
   /* bits per sample */
   bps = gst_bit_reader_get_bits_uint8_unchecked (&reader, 3);
-  if (bps == 0x03 || bps == 0x07) {
+  if (bps == 0x03) {
     goto error;
   } else if (bps == 0 && flacparse->bps == 0) {
     goto need_streaminfo;
@@ -1108,6 +1111,7 @@ gst_flac_parse_handle_picture (GstFlacParse * flacparse, GstBuffer * buffer)
   GstMapInfo map;
   guint32 img_len = 0, img_type = 0;
   guint32 img_mimetype_len = 0, img_description_len = 0;
+  const guint8 *img_data;
 
   gst_buffer_map (buffer, &map, GST_MAP_READ);
   gst_byte_reader_init (&reader, map.data, map.size);
@@ -1134,7 +1138,7 @@ gst_flac_parse_handle_picture (GstFlacParse * flacparse, GstBuffer * buffer)
   if (!gst_byte_reader_get_uint32_be (&reader, &img_len))
     goto error;
 
-  if (gst_byte_reader_get_pos (&reader) + img_len > map.size)
+  if (!gst_byte_reader_get_data (&reader, img_len, &img_data))
     goto error;
 
   GST_INFO_OBJECT (flacparse, "Got image of %d bytes", img_len);
@@ -1143,8 +1147,7 @@ gst_flac_parse_handle_picture (GstFlacParse * flacparse, GstBuffer * buffer)
     if (flacparse->tags == NULL)
       flacparse->tags = gst_tag_list_new_empty ();
 
-    gst_tag_list_add_id3_image (flacparse->tags,
-        map.data + gst_byte_reader_get_pos (&reader), img_len, img_type);
+    gst_tag_list_add_id3_image (flacparse->tags, img_data, img_len, img_type);
   }
 
   gst_buffer_unmap (buffer, &map);

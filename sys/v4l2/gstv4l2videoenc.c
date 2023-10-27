@@ -35,7 +35,7 @@
 #include "gstv4l2videoenc.h"
 
 #include <string.h>
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_v4l2_video_enc_debug);
 #define GST_CAT_DEFAULT gst_v4l2_video_enc_debug
@@ -342,6 +342,9 @@ gst_v4l2_video_enc_set_format (GstVideoEncoder * encoder,
     return FALSE;
   }
 
+  /* best effort */
+  gst_v4l2_object_setup_padding (self->v4l2output);
+
   self->input_state = gst_video_codec_state_ref (state);
 
   GST_DEBUG_OBJECT (self, "output caps: %" GST_PTR_FORMAT, state->caps);
@@ -514,6 +517,26 @@ negotiate_profile_and_level (GstCapsFeatures * features, GstStructure * s,
   return failed;
 }
 
+static GstCaps *
+gst_v4l2_video_enc_sink_getcaps (GstVideoEncoder * encoder, GstCaps * filter)
+{
+  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
+  GstCaps *probed_caps = NULL;
+  GstCaps *caps;
+
+  if (self->probed_sinkcaps)
+    probed_caps = gst_caps_ref (self->probed_sinkcaps);
+
+  caps = gst_video_encoder_proxy_getcaps (encoder, probed_caps, filter);
+
+  if (probed_caps)
+    gst_caps_unref (probed_caps);
+
+  GST_DEBUG_OBJECT (self, "Returning sink caps %" GST_PTR_FORMAT, caps);
+
+  return caps;
+}
+
 static gboolean
 gst_v4l2_video_enc_negotiate (GstVideoEncoder * encoder)
 {
@@ -612,35 +635,20 @@ not_negotiated:
   return FALSE;
 }
 
-static GstVideoCodecFrame *
-gst_v4l2_video_enc_get_oldest_frame (GstVideoEncoder * encoder)
+static gboolean
+check_system_frame_number_too_old (guint32 current, guint32 old)
 {
-  GstVideoCodecFrame *frame = NULL;
-  GList *frames, *l;
-  gint count = 0;
+  guint32 absdiff = current > old ? current - old : old - current;
 
-  frames = gst_video_encoder_get_frames (encoder);
-
-  for (l = frames; l != NULL; l = l->next) {
-    GstVideoCodecFrame *f = l->data;
-
-    if (!frame || frame->pts > f->pts)
-      frame = f;
-
-    count++;
+  /* More than 100 frames in the past, or current wrapped around */
+  if (absdiff > 100) {
+    /* Wraparound and difference is actually smaller than 100 */
+    if (absdiff > G_MAXUINT32 - 100)
+      return FALSE;
+    return TRUE;
   }
 
-  if (frame) {
-    GST_LOG_OBJECT (encoder,
-        "Oldest frame is %d %" GST_TIME_FORMAT
-        " and %d frames left",
-        frame->system_frame_number, GST_TIME_ARGS (frame->pts), count - 1);
-    gst_video_codec_frame_ref (frame);
-  }
-
-  g_list_free_full (frames, (GDestroyNotify) gst_video_codec_frame_unref);
-
-  return frame;
+  return FALSE;
 }
 
 static void
@@ -661,20 +669,49 @@ gst_v4l2_video_enc_loop (GstVideoEncoder * encoder)
     goto beach;
   }
 
-
   /* FIXME Check if buffer isn't the last one here */
 
   GST_LOG_OBJECT (encoder, "Process output buffer");
-  ret =
-      gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL
-      (self->v4l2capture->pool), &buffer);
-
+  {
+    GstV4l2BufferPool *cpool =
+        GST_V4L2_BUFFER_POOL (gst_v4l2_object_get_buffer_pool
+        (self->v4l2capture));
+    ret = gst_v4l2_buffer_pool_process (cpool, &buffer, NULL);
+    if (cpool)
+      gst_object_unref (cpool);
+  }
   if (ret != GST_FLOW_OK)
     goto beach;
 
-  frame = gst_v4l2_video_enc_get_oldest_frame (encoder);
+  if (GST_BUFFER_TIMESTAMP (buffer) % GST_SECOND != 0)
+    GST_ERROR_OBJECT (encoder,
+        "Driver bug detected - check driver with v4l2-compliance from http://git.linuxtv.org/v4l-utils.git");
+  GST_LOG_OBJECT (encoder, "Got buffer for frame number %u",
+      (guint32) (GST_BUFFER_PTS (buffer) / GST_SECOND));
+  frame =
+      gst_video_encoder_get_frame (encoder,
+      GST_BUFFER_TIMESTAMP (buffer) / GST_SECOND);
 
   if (frame) {
+    GstVideoCodecFrame *oldest_frame;
+    gboolean warned = FALSE;
+
+    /* Garbage collect old frames in case of codec bugs */
+    while ((oldest_frame = gst_video_encoder_get_oldest_frame (encoder)) &&
+        check_system_frame_number_too_old (frame->system_frame_number,
+            oldest_frame->system_frame_number)) {
+      gst_video_encoder_finish_frame (encoder, oldest_frame);
+      oldest_frame = NULL;
+
+      if (!warned) {
+        g_warning ("%s: Too old frames, bug in encoder -- please file a bug",
+            GST_ELEMENT_NAME (encoder));
+        warned = TRUE;
+      }
+    }
+    if (oldest_frame)
+      gst_video_codec_frame_unref (oldest_frame);
+
     /* At this point, the delta unit buffer flag is already correctly set by
      * gst_v4l2_buffer_pool_process. Since gst_video_encoder_finish_frame
      * will overwrite it from GST_VIDEO_CODEC_FRAME_IS_SYNC_POINT (frame),
@@ -728,6 +765,7 @@ gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
   GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   GstFlowReturn ret = GST_FLOW_OK;
   GstTaskState task_state;
+  gboolean active;
 
   GST_DEBUG_OBJECT (self, "Handling frame %d", frame->system_frame_number);
 
@@ -736,7 +774,7 @@ gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
 
   task_state = gst_pad_get_task_state (GST_VIDEO_ENCODER_SRC_PAD (self));
   if (task_state == GST_TASK_STOPPED || task_state == GST_TASK_PAUSED) {
-    GstBufferPool *pool = GST_BUFFER_POOL (self->v4l2output->pool);
+    GstBufferPool *pool = gst_v4l2_object_get_buffer_pool (self->v4l2output);
 
     /* It is possible that the processing thread stopped due to an error or
      * when the last buffer has been met during the draining process. */
@@ -746,6 +784,8 @@ gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
       GST_DEBUG_OBJECT (self, "Processing loop stopped with error: %s, leaving",
           gst_flow_get_name (self->output_flow));
       ret = self->output_flow;
+      if (pool)
+        gst_object_unref (pool);
       goto drop;
     }
 
@@ -759,15 +799,29 @@ gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
           self->v4l2output->info.size, min, min);
 
       /* There is no reason to refuse this config */
-      if (!gst_buffer_pool_set_config (pool, config))
+      if (!gst_buffer_pool_set_config (pool, config)) {
+        if (pool)
+          gst_object_unref (pool);
         goto activate_failed;
+      }
 
-      if (!gst_buffer_pool_set_active (pool, TRUE))
+      if (!gst_buffer_pool_set_active (pool, TRUE)) {
+        if (pool)
+          gst_object_unref (pool);
         goto activate_failed;
+      }
+      if (pool)
+        gst_object_unref (pool);
     }
 
-    if (!gst_buffer_pool_set_active
-        (GST_BUFFER_POOL (self->v4l2capture->pool), TRUE)) {
+    {
+      GstBufferPool *cpool =
+          gst_v4l2_object_get_buffer_pool (self->v4l2capture);
+      active = gst_buffer_pool_set_active (cpool, TRUE);
+      if (cpool)
+        gst_object_unref (cpool);
+    }
+    if (!active) {
       GST_WARNING_OBJECT (self, "Could not activate capture buffer pool.");
       goto activate_failed;
     }
@@ -783,10 +837,29 @@ gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
   }
 
   if (frame->input_buffer) {
+    /* Process force keyframe event if it was passed */
+    if (GST_VIDEO_CODEC_FRAME_IS_FORCE_KEYFRAME (frame)) {
+      struct v4l2_control ctrl = { V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 1 };
+      if (self->v4l2output->ioctl (self->v4l2output->video_fd, VIDIOC_S_CTRL,
+              &ctrl) < 0)
+        GST_ELEMENT_WARNING (self, RESOURCE, FAILED,
+            (_("Failed to force keyframe.")),
+            ("VIDIOC_S_CTRL (V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME) failed: %s (%d)",
+                g_strerror (errno), errno));
+    }
+
     GST_VIDEO_ENCODER_STREAM_UNLOCK (encoder);
-    ret =
-        gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL
-        (self->v4l2output->pool), &frame->input_buffer);
+    GST_LOG_OBJECT (encoder, "Passing buffer with frame number %u",
+        frame->system_frame_number);
+
+    {
+      GstBufferPool *opool = gst_v4l2_object_get_buffer_pool (self->v4l2output);
+      ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL (opool),
+          &frame->input_buffer, &frame->system_frame_number);
+      if (opool)
+        gst_object_unref (opool);
+    }
+
     GST_VIDEO_ENCODER_STREAM_LOCK (encoder);
 
     if (ret == GST_FLOW_FLUSHING) {
@@ -863,6 +936,9 @@ gst_v4l2_video_enc_decide_allocation (GstVideoEncoder *
   }
   gst_caps_unref (caps);
 
+  /* best effort */
+  gst_v4l2_object_setup_padding (self->v4l2capture);
+
   if (gst_v4l2_object_decide_allocation (self->v4l2capture, query)) {
     GstVideoEncoderClass *enc_class = GST_VIDEO_ENCODER_CLASS (parent_class);
     ret = enc_class->decide_allocation (encoder, query);
@@ -873,8 +949,12 @@ gst_v4l2_video_enc_decide_allocation (GstVideoEncoder *
    * more work to explicitly expressed the decoder / encoder latency. This
    * value will then become max latency, and the reported driver latency would
    * become the min latency. */
+  if (!GST_CLOCK_TIME_IS_VALID (self->v4l2capture->duration))
+    self->v4l2capture->duration = gst_util_uint64_scale_int (GST_SECOND, 1, 25);
   latency = self->v4l2capture->min_buffers * self->v4l2capture->duration;
   gst_video_encoder_set_latency (encoder, latency, latency);
+  GST_DEBUG_OBJECT (self, "Setting latency: %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (latency));
 
 done:
   gst_video_codec_state_unref (state);
@@ -939,46 +1019,6 @@ gst_v4l2_video_enc_src_query (GstVideoEncoder * encoder, GstQuery * query)
 
     default:
       ret = GST_VIDEO_ENCODER_CLASS (parent_class)->src_query (encoder, query);
-      break;
-  }
-
-  return ret;
-}
-
-static gboolean
-gst_v4l2_video_enc_sink_query (GstVideoEncoder * encoder, GstQuery * query)
-{
-  gboolean ret = TRUE;
-  GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
-
-  switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_CAPS:{
-      GstCaps *filter, *result = NULL;
-      GstPad *pad = GST_VIDEO_ENCODER_SINK_PAD (encoder);
-
-      gst_query_parse_caps (query, &filter);
-
-      if (self->probed_sinkcaps)
-        result = gst_caps_ref (self->probed_sinkcaps);
-      else
-        result = gst_pad_get_pad_template_caps (pad);
-
-      if (filter) {
-        GstCaps *tmp = result;
-        result =
-            gst_caps_intersect_full (filter, tmp, GST_CAPS_INTERSECT_FIRST);
-        gst_caps_unref (tmp);
-      }
-
-      GST_DEBUG_OBJECT (self, "Returning sink caps %" GST_PTR_FORMAT, result);
-
-      gst_query_set_caps_result (query, result);
-      gst_caps_unref (result);
-      break;
-    }
-
-    default:
-      ret = GST_VIDEO_ENCODER_CLASS (parent_class)->sink_query (encoder, query);
       break;
   }
 
@@ -1110,14 +1150,14 @@ gst_v4l2_video_enc_class_init (GstV4l2VideoEncClass * klass)
   video_encoder_class->flush = GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_flush);
   video_encoder_class->set_format =
       GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_set_format);
+  video_encoder_class->getcaps =
+      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_sink_getcaps);
   video_encoder_class->negotiate =
       GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_negotiate);
   video_encoder_class->decide_allocation =
       GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_decide_allocation);
   video_encoder_class->propose_allocation =
       GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_propose_allocation);
-  video_encoder_class->sink_query =
-      GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_sink_query);
   video_encoder_class->src_query =
       GST_DEBUG_FUNCPTR (gst_v4l2_video_enc_src_query);
   video_encoder_class->sink_event =

@@ -68,11 +68,16 @@ struct _GstShout2send {
   gchar *songmetadata;
   gchar *songartist;
   gchar *songtitle;
+  gboolean send_title_info;
+  gchar *user_agent;
   gint  format;
   guint timeout;
+  guint usage;                   /* SHOUT_USAGE_* */
 
   GstTagList* tags;
 };
+
+GST_ELEMENT_REGISTER_DECLARE (shout2send);
 
 G_END_DECLS
 

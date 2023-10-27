@@ -30,6 +30,7 @@
 #include <gst/glib-compat-private.h>
 
 #include "rtpsession.h"
+#include "gstrtputils.h"
 
 GST_DEBUG_CATEGORY (rtp_session_debug);
 #define GST_CAT_DEFAULT rtp_session_debug
@@ -78,6 +79,9 @@ enum
 #define DEFAULT_RTP_PROFILE          GST_RTP_PROFILE_AVP
 #define DEFAULT_RTCP_REDUCED_SIZE    FALSE
 #define DEFAULT_RTCP_DISABLE_SR_TIMESTAMP FALSE
+#define DEFAULT_FAVOR_NEW            FALSE
+#define DEFAULT_TWCC_FEEDBACK_INTERVAL GST_CLOCK_TIME_NONE
+#define DEFAULT_UPDATE_NTP64_HEADER_EXT TRUE
 
 enum
 {
@@ -103,8 +107,13 @@ enum
   PROP_STATS,
   PROP_RTP_PROFILE,
   PROP_RTCP_REDUCED_SIZE,
-  PROP_RTCP_DISABLE_SR_TIMESTAMP
+  PROP_RTCP_DISABLE_SR_TIMESTAMP,
+  PROP_TWCC_FEEDBACK_INTERVAL,
+  PROP_UPDATE_NTP64_HEADER_EXT,
+  PROP_LAST,
 };
+
+static GParamSpec *properties[PROP_LAST];
 
 /* update average packet size */
 #define INIT_AVG(avg, val) \
@@ -114,9 +123,6 @@ enum
    (avg) = (val);                       \
   else                                  \
    (avg) = ((val) + (15 * (avg))) >> 4;
-
-
-#define TWCC_EXTMAP_STR "http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01"
 
 /* GObject vmethods */
 static void rtp_session_finalize (GObject * object);
@@ -449,64 +455,62 @@ rtp_session_class_init (RTPSessionClass * klass)
       G_TYPE_UINT, 4, G_TYPE_UINT, G_TYPE_UINT, G_TYPE_ARRAY,
       GST_TYPE_BUFFER | G_SIGNAL_TYPE_STATIC_SCOPE);
 
-  g_object_class_install_property (gobject_class, PROP_INTERNAL_SSRC,
+  properties[PROP_INTERNAL_SSRC] =
       g_param_spec_uint ("internal-ssrc", "Internal SSRC",
-          "The internal SSRC used for the session (deprecated)",
-          0, G_MAXUINT, 0,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-          GST_PARAM_DOC_SHOW_DEFAULT));
+      "The internal SSRC used for the session (deprecated)",
+      0, G_MAXUINT, 0,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_DOC_SHOW_DEFAULT);
 
-  g_object_class_install_property (gobject_class, PROP_INTERNAL_SOURCE,
+  properties[PROP_INTERNAL_SOURCE] =
       g_param_spec_object ("internal-source", "Internal Source",
-          "The internal source element of the session (deprecated)",
-          RTP_TYPE_SOURCE, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+      "The internal source element of the session (deprecated)",
+      RTP_TYPE_SOURCE, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_BANDWIDTH,
+  properties[PROP_BANDWIDTH] =
       g_param_spec_double ("bandwidth", "Bandwidth",
-          "The bandwidth of the session in bits per second (0 for auto-discover)",
-          0.0, G_MAXDOUBLE, DEFAULT_BANDWIDTH,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The bandwidth of the session in bits per second (0 for auto-discover)",
+      0.0, G_MAXDOUBLE, DEFAULT_BANDWIDTH,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTCP_FRACTION,
+  properties[PROP_RTCP_FRACTION] =
       g_param_spec_double ("rtcp-fraction", "RTCP Fraction",
-          "The fraction of the bandwidth used for RTCP in bits per second (or as a real fraction of the RTP bandwidth if < 1)",
-          0.0, G_MAXDOUBLE, DEFAULT_RTCP_FRACTION,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The fraction of the bandwidth used for RTCP in bits per second (or as a real fraction of the RTP bandwidth if < 1)",
+      0.0, G_MAXDOUBLE, DEFAULT_RTCP_FRACTION,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTCP_RR_BANDWIDTH,
+  properties[PROP_RTCP_RR_BANDWIDTH] =
       g_param_spec_int ("rtcp-rr-bandwidth", "RTCP RR bandwidth",
-          "The RTCP bandwidth used for receivers in bits per second (-1 = default)",
-          -1, G_MAXINT, DEFAULT_RTCP_RR_BANDWIDTH,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The RTCP bandwidth used for receivers in bits per second (-1 = default)",
+      -1, G_MAXINT, DEFAULT_RTCP_RR_BANDWIDTH,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTCP_RS_BANDWIDTH,
+  properties[PROP_RTCP_RS_BANDWIDTH] =
       g_param_spec_int ("rtcp-rs-bandwidth", "RTCP RS bandwidth",
-          "The RTCP bandwidth used for senders in bits per second (-1 = default)",
-          -1, G_MAXINT, DEFAULT_RTCP_RS_BANDWIDTH,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The RTCP bandwidth used for senders in bits per second (-1 = default)",
+      -1, G_MAXINT, DEFAULT_RTCP_RS_BANDWIDTH,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTCP_MTU,
+  properties[PROP_RTCP_MTU] =
       g_param_spec_uint ("rtcp-mtu", "RTCP MTU",
-          "The maximum size of the RTCP packets",
-          16, G_MAXINT16, DEFAULT_RTCP_MTU,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The maximum size of the RTCP packets",
+      16, G_MAXINT16, DEFAULT_RTCP_MTU,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_SDES,
+  properties[PROP_SDES] =
       g_param_spec_boxed ("sdes", "SDES",
-          "The SDES items of this session",
-          GST_TYPE_STRUCTURE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
-          | GST_PARAM_DOC_SHOW_DEFAULT));
+      "The SDES items of this session",
+      GST_TYPE_STRUCTURE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+      | GST_PARAM_DOC_SHOW_DEFAULT);
 
-  g_object_class_install_property (gobject_class, PROP_NUM_SOURCES,
+  properties[PROP_NUM_SOURCES] =
       g_param_spec_uint ("num-sources", "Num Sources",
-          "The number of sources in the session", 0, G_MAXUINT,
-          DEFAULT_NUM_SOURCES, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+      "The number of sources in the session", 0, G_MAXUINT,
+      DEFAULT_NUM_SOURCES, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_NUM_ACTIVE_SOURCES,
+  properties[PROP_NUM_ACTIVE_SOURCES] =
       g_param_spec_uint ("num-active-sources", "Num Active Sources",
-          "The number of active sources in the session", 0, G_MAXUINT,
-          DEFAULT_NUM_ACTIVE_SOURCES,
-          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+      "The number of active sources in the session", 0, G_MAXUINT,
+      DEFAULT_NUM_ACTIVE_SOURCES, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
   /**
    * RTPSource:sources
    *
@@ -532,56 +536,54 @@ rtp_session_class_init (RTPSessionClass * klass)
    * }
    * ```
    */
-  g_object_class_install_property (gobject_class, PROP_SOURCES,
+  properties[PROP_SOURCES] =
       g_param_spec_boxed ("sources", "Sources",
-          "An array of all known sources in the session",
-          G_TYPE_VALUE_ARRAY, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+      "An array of all known sources in the session",
+      G_TYPE_VALUE_ARRAY, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_FAVOR_NEW,
+  properties[PROP_FAVOR_NEW] =
       g_param_spec_boolean ("favor-new", "Favor new sources",
-          "Resolve SSRC conflict in favor of new sources", FALSE,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "Resolve SSRC conflict in favor of new sources", DEFAULT_FAVOR_NEW,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTCP_MIN_INTERVAL,
+  properties[PROP_RTCP_MIN_INTERVAL] =
       g_param_spec_uint64 ("rtcp-min-interval", "Minimum RTCP interval",
-          "Minimum interval between Regular RTCP packet (in ns)",
-          0, G_MAXUINT64, DEFAULT_RTCP_MIN_INTERVAL,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "Minimum interval between Regular RTCP packet (in ns)",
+      0, G_MAXUINT64, DEFAULT_RTCP_MIN_INTERVAL,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class,
-      PROP_RTCP_FEEDBACK_RETENTION_WINDOW,
+  properties[PROP_RTCP_FEEDBACK_RETENTION_WINDOW] =
       g_param_spec_uint64 ("rtcp-feedback-retention-window",
-          "RTCP Feedback retention window",
-          "Duration during which RTCP Feedback packets are retained (in ns)",
-          0, G_MAXUINT64, DEFAULT_RTCP_FEEDBACK_RETENTION_WINDOW,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "RTCP Feedback retention window",
+      "Duration during which RTCP Feedback packets are retained (in ns)",
+      0, G_MAXUINT64, DEFAULT_RTCP_FEEDBACK_RETENTION_WINDOW,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class,
-      PROP_RTCP_IMMEDIATE_FEEDBACK_THRESHOLD,
+  properties[PROP_RTCP_IMMEDIATE_FEEDBACK_THRESHOLD] =
       g_param_spec_uint ("rtcp-immediate-feedback-threshold",
-          "RTCP Immediate Feedback threshold",
-          "The maximum number of members of a RTP session for which immediate"
-          " feedback is used (DEPRECATED: has no effect and is not needed)",
-          0, G_MAXUINT, DEFAULT_RTCP_IMMEDIATE_FEEDBACK_THRESHOLD,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_DEPRECATED));
+      "RTCP Immediate Feedback threshold",
+      "The maximum number of members of a RTP session for which immediate"
+      " feedback is used (DEPRECATED: has no effect and is not needed)",
+      0, G_MAXUINT, DEFAULT_RTCP_IMMEDIATE_FEEDBACK_THRESHOLD,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_DEPRECATED);
 
-  g_object_class_install_property (gobject_class, PROP_PROBATION,
+  properties[PROP_PROBATION] =
       g_param_spec_uint ("probation", "Number of probations",
-          "Consecutive packet sequence numbers to accept the source",
-          0, G_MAXUINT, DEFAULT_PROBATION,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "Consecutive packet sequence numbers to accept the source",
+      0, G_MAXUINT, DEFAULT_PROBATION,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_MAX_DROPOUT_TIME,
+  properties[PROP_MAX_DROPOUT_TIME] =
       g_param_spec_uint ("max-dropout-time", "Max dropout time",
-          "The maximum time (milliseconds) of missing packets tolerated.",
-          0, G_MAXUINT, DEFAULT_MAX_DROPOUT_TIME,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The maximum time (milliseconds) of missing packets tolerated.",
+      0, G_MAXUINT, DEFAULT_MAX_DROPOUT_TIME,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_MAX_MISORDER_TIME,
+  properties[PROP_MAX_MISORDER_TIME] =
       g_param_spec_uint ("max-misorder-time", "Max misorder time",
-          "The maximum time (milliseconds) of misordered packets tolerated.",
-          0, G_MAXUINT, DEFAULT_MAX_MISORDER_TIME,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "The maximum time (milliseconds) of misordered packets tolerated.",
+      0, G_MAXUINT, DEFAULT_MAX_MISORDER_TIME,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
   /**
    * RTPSession:stats:
@@ -598,21 +600,20 @@ rtp_session_class_init (RTPSessionClass * klass)
    *
    * Since: 1.4
    */
-  g_object_class_install_property (gobject_class, PROP_STATS,
+  properties[PROP_STATS] =
       g_param_spec_boxed ("stats", "Statistics",
-          "Various statistics", GST_TYPE_STRUCTURE,
-          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+      "Various statistics", GST_TYPE_STRUCTURE,
+      G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTP_PROFILE,
+  properties[PROP_RTP_PROFILE] =
       g_param_spec_enum ("rtp-profile", "RTP Profile",
-          "RTP profile to use for this session", GST_TYPE_RTP_PROFILE,
-          DEFAULT_RTP_PROFILE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "RTP profile to use for this session", GST_TYPE_RTP_PROFILE,
+      DEFAULT_RTP_PROFILE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
-  g_object_class_install_property (gobject_class, PROP_RTCP_REDUCED_SIZE,
+  properties[PROP_RTCP_REDUCED_SIZE] =
       g_param_spec_boolean ("rtcp-reduced-size", "RTCP Reduced Size",
-          "Use Reduced Size RTCP for feedback packets",
-          DEFAULT_RTCP_REDUCED_SIZE,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "Use Reduced Size RTCP for feedback packets",
+      DEFAULT_RTCP_REDUCED_SIZE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
 
   /**
    * RTPSession:disable-sr-timestamp:
@@ -621,13 +622,45 @@ rtp_session_class_init (RTPSessionClass * klass)
    *
    * Since: 1.16
    */
-  g_object_class_install_property (gobject_class,
-      PROP_RTCP_DISABLE_SR_TIMESTAMP,
+  properties[PROP_RTCP_DISABLE_SR_TIMESTAMP] =
       g_param_spec_boolean ("disable-sr-timestamp",
-          "Disable Sender Report Timestamp",
-          "Whether sender reports should be timestamped",
-          DEFAULT_RTCP_DISABLE_SR_TIMESTAMP,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      "Disable Sender Report Timestamp",
+      "Whether sender reports should be timestamped",
+      DEFAULT_RTCP_DISABLE_SR_TIMESTAMP,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+  /**
+   * RTPSession:twcc-feedback-interval:
+   *
+   * The interval to send TWCC reports on.
+   * This overrides the default behavior of sending reports
+   * based on marker-bits.
+   *
+   * Since: 1.20
+   */
+  properties[PROP_TWCC_FEEDBACK_INTERVAL] =
+      g_param_spec_uint64 ("twcc-feedback-interval",
+      "TWCC Feedback Interval",
+      "The interval to send TWCC reports on",
+      0, G_MAXUINT64, DEFAULT_TWCC_FEEDBACK_INTERVAL,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+  /**
+   * RTPSession:update-ntp64-header-ext:
+   *
+   * Whether RTP NTP header extension should be updated with actual
+   * NTP time. If not, use the NTP time from buffer timestamp metadata
+   *
+   * Since: 1.22
+   */
+  properties[PROP_UPDATE_NTP64_HEADER_EXT] =
+      g_param_spec_boolean ("update-ntp64-header-ext",
+      "Update NTP-64 RTP Header Extension",
+      "Whether RTP NTP header extension should be updated with actual NTP time",
+      DEFAULT_UPDATE_NTP64_HEADER_EXT,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+  g_object_class_install_properties (gobject_class, PROP_LAST, properties);
 
   klass->get_source_by_ssrc =
       GST_DEBUG_FUNCPTR (rtp_session_get_source_by_ssrc);
@@ -672,9 +705,12 @@ rtp_session_init (RTPSession * sess)
   sess->header_len = UDP_IP_HEADER_OVERHEAD;
   sess->mtu = DEFAULT_RTCP_MTU;
 
+  sess->update_ntp64_header_ext = DEFAULT_UPDATE_NTP64_HEADER_EXT;
+
   sess->probation = DEFAULT_PROBATION;
   sess->max_dropout_time = DEFAULT_MAX_DROPOUT_TIME;
   sess->max_misorder_time = DEFAULT_MAX_MISORDER_TIME;
+  sess->favor_new = DEFAULT_FAVOR_NEW;
 
   /* some default SDES entries */
   sess->sdes = gst_structure_new_empty ("application/x-rtp-source-sdes");
@@ -907,6 +943,13 @@ rtp_session_set_property (GObject * object, guint prop_id,
     case PROP_RTCP_DISABLE_SR_TIMESTAMP:
       sess->timestamp_sender_reports = !g_value_get_boolean (value);
       break;
+    case PROP_TWCC_FEEDBACK_INTERVAL:
+      rtp_twcc_manager_set_feedback_interval (sess->twcc,
+          g_value_get_uint64 (value));
+      break;
+    case PROP_UPDATE_NTP64_HEADER_EXT:
+      sess->update_ntp64_header_ext = g_value_get_boolean (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -988,6 +1031,13 @@ rtp_session_get_property (GObject * object, guint prop_id,
       break;
     case PROP_RTCP_DISABLE_SR_TIMESTAMP:
       g_value_set_boolean (value, !sess->timestamp_sender_reports);
+      break;
+    case PROP_TWCC_FEEDBACK_INTERVAL:
+      g_value_set_uint64 (value,
+          rtp_twcc_manager_get_feedback_interval (sess->twcc));
+      break;
+    case PROP_UPDATE_NTP64_HEADER_EXT:
+      g_value_set_boolean (value, sess->update_ntp64_header_ext);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1139,6 +1189,7 @@ rtp_session_reset (RTPSession * sess)
 {
   g_return_if_fail (RTP_IS_SESSION (sess));
 
+  RTP_SESSION_LOCK (sess);
   /* remove all sources */
   g_hash_table_remove_all (sess->ssrcs[sess->mask_idx]);
   sess->total_sources = 0;
@@ -1167,6 +1218,7 @@ rtp_session_reset (RTPSession * sess)
   g_list_free_full (sess->conflicting_addresses,
       (GDestroyNotify) rtp_conflicting_address_free);
   sess->conflicting_addresses = NULL;
+  RTP_SESSION_UNLOCK (sess);
 }
 
 /**
@@ -1199,9 +1251,9 @@ rtp_session_set_callbacks (RTPSession * sess, RTPSessionCallbacks * callbacks,
     sess->callbacks.sync_rtcp = callbacks->sync_rtcp;
     sess->sync_rtcp_user_data = user_data;
   }
-  if (callbacks->clock_rate) {
-    sess->callbacks.clock_rate = callbacks->clock_rate;
-    sess->clock_rate_user_data = user_data;
+  if (callbacks->caps) {
+    sess->callbacks.caps = callbacks->caps;
+    sess->caps_user_data = user_data;
   }
   if (callbacks->reconsider) {
     sess->callbacks.reconsider = callbacks->reconsider;
@@ -1306,7 +1358,7 @@ rtp_session_set_sync_rtcp_callback (RTPSession * sess,
 }
 
 /**
- * rtp_session_set_clock_rate_callback:
+ * rtp_session_set_caps_callback:
  * @sess: an #RTPSession
  * @callback: callback to set
  * @user_data: user data passed in the callback
@@ -1314,13 +1366,13 @@ rtp_session_set_sync_rtcp_callback (RTPSession * sess,
  * Configure only the clock_rate callback to be notified of the clock_rate action.
  */
 void
-rtp_session_set_clock_rate_callback (RTPSession * sess,
-    RTPSessionClockRate callback, gpointer user_data)
+rtp_session_set_caps_callback (RTPSession * sess,
+    RTPSessionCaps callback, gpointer user_data)
 {
   g_return_if_fail (RTP_IS_SESSION (sess));
 
-  sess->callbacks.clock_rate = callback;
-  sess->clock_rate_user_data = user_data;
+  sess->callbacks.caps = callback;
+  sess->caps_user_data = user_data;
 }
 
 /**
@@ -1524,30 +1576,26 @@ source_push_rtp (RTPSource * source, gpointer data, RTPSession * session)
   return result;
 }
 
-static gint
-source_clock_rate (RTPSource * source, guint8 pt, RTPSession * session)
+static GstCaps *
+source_caps (RTPSource * source, guint8 pt, RTPSession * session)
 {
-  gint result;
+  GstCaps *result = NULL;
 
   RTP_SESSION_UNLOCK (session);
 
-  if (session->callbacks.clock_rate)
-    result =
-        session->callbacks.clock_rate (session, pt,
-        session->clock_rate_user_data);
-  else
-    result = -1;
+  if (session->callbacks.caps)
+    result = session->callbacks.caps (session, pt, session->caps_user_data);
 
   RTP_SESSION_LOCK (session);
 
-  GST_DEBUG ("got clock-rate %d for pt %d", result, pt);
+  GST_DEBUG ("got caps %" GST_PTR_FORMAT " for pt %d", result, pt);
 
   return result;
 }
 
 static RTPSourceCallbacks callbacks = {
   (RTPSourcePushRTP) source_push_rtp,
-  (RTPSourceClockRate) source_clock_rate,
+  (RTPSourceCaps) source_caps,
 };
 
 
@@ -1899,7 +1947,8 @@ obtain_internal_source (RTPSession * sess, guint32 ssrc, gboolean * created,
 
     source->validated = TRUE;
     source->internal = TRUE;
-    source->probation = FALSE;
+    source->probation = 0;
+    source->curr_probation = 0;
     rtp_source_set_sdes_struct (source, gst_structure_copy (sess->sdes));
     rtp_source_set_callbacks (source, &callbacks, sess);
 
@@ -2094,6 +2143,25 @@ update_packet (GstBuffer ** buffer, guint idx, RTPPacketInfo * pinfo)
       pinfo->header_ext = gst_rtp_buffer_get_extension_bytes (&rtp,
           &pinfo->header_ext_bit_pattern);
     }
+
+    if (pinfo->ntp64_ext_id != 0 && pinfo->send && !pinfo->have_ntp64_ext) {
+      guint8 *data;
+      guint size;
+
+      /* Remember here that there is a 64-bit NTP header extension on this buffer
+       * or any of the other buffers in the buffer list.
+       * Later we update this after making the buffer(list) writable.
+       */
+      if ((gst_rtp_buffer_get_extension_onebyte_header (&rtp,
+                  pinfo->ntp64_ext_id, 0, (gpointer *) & data, &size)
+              && size == 8)
+          || (gst_rtp_buffer_get_extension_twobytes_header (&rtp, NULL,
+                  pinfo->ntp64_ext_id, 0, (gpointer *) & data, &size)
+              && size == 8)) {
+        pinfo->have_ntp64_ext = TRUE;
+      }
+    }
+
     gst_rtp_buffer_unmap (&rtp);
   }
 
@@ -2142,15 +2210,19 @@ update_packet_info (RTPSession * sess, RTPPacketInfo * pinfo,
   pinfo->payload_len = 0;
   pinfo->packets = 0;
   pinfo->marker = FALSE;
+  pinfo->ntp64_ext_id = send ? sess->send_ntp64_ext_id : 0;
+  pinfo->have_ntp64_ext = FALSE;
 
   if (is_list) {
     GstBufferList *list = GST_BUFFER_LIST_CAST (data);
     res =
         gst_buffer_list_foreach (list, (GstBufferListFunc) update_packet,
         pinfo);
+    pinfo->arrival_time = GST_CLOCK_TIME_NONE;
   } else {
     GstBuffer *buffer = GST_BUFFER_CAST (data);
     res = update_packet (&buffer, 0, pinfo);
+    pinfo->arrival_time = GST_BUFFER_DTS (buffer);
   }
 
   return res;
@@ -2167,22 +2239,6 @@ clean_packet_info (RTPPacketInfo * pinfo)
   }
   if (pinfo->header_ext)
     g_bytes_unref (pinfo->header_ext);
-}
-
-static gint32
-packet_info_get_twcc_seqnum (RTPPacketInfo * pinfo, guint8 ext_id)
-{
-  gint32 val = -1;
-  gpointer data;
-  guint size;
-
-  if (pinfo->header_ext &&
-      gst_rtp_buffer_get_extension_onebyte_header_from_bytes (pinfo->header_ext,
-          pinfo->header_ext_bit_pattern, ext_id, 0, &data, &size)) {
-    if (size == 2)
-      val = GST_READ_UINT16_BE (data);
-  }
-  return val;
 }
 
 static gboolean
@@ -2210,16 +2266,7 @@ source_update_active (RTPSession * sess, RTPSource * source,
 static void
 process_twcc_packet (RTPSession * sess, RTPPacketInfo * pinfo)
 {
-  gint32 twcc_seqnum;
-
-  if (sess->twcc_recv_ext_id == 0)
-    return;
-
-  twcc_seqnum = packet_info_get_twcc_seqnum (pinfo, sess->twcc_recv_ext_id);
-  if (twcc_seqnum == -1)
-    return;
-
-  if (rtp_twcc_manager_recv_packet (sess->twcc, twcc_seqnum, pinfo)) {
+  if (rtp_twcc_manager_recv_packet (sess->twcc, pinfo)) {
     RTP_SESSION_UNLOCK (sess);
 
     /* TODO: find a better rational for this number, and possibly tune it based
@@ -2393,7 +2440,7 @@ rtp_session_process_rb (RTPSession * sess, RTPSource * source,
        * the sender of the RTCP message. We could also compare our stats against
        * the other sender to see if we are better or worse. */
       /* FIXME, need to keep track who the RB block is from */
-      rtp_source_process_rb (source, pinfo->ntpnstime, fractionlost,
+      rtp_source_process_rb (source, ssrc, pinfo->ntpnstime, fractionlost,
           packetslost, exthighestseq, jitter, lsr, dlsr);
     }
   }
@@ -2722,11 +2769,16 @@ rtp_session_process_app (RTPSession * sess, GstRTCPPacket * packet,
 
 static gboolean
 rtp_session_request_local_key_unit (RTPSession * sess, RTPSource * src,
-    guint32 media_ssrc, gboolean fir, GstClockTime current_time)
+    const guint32 * ssrcs, guint num_ssrcs, gboolean fir,
+    GstClockTime current_time)
 {
   guint32 round_trip = 0;
+  gint i;
 
-  rtp_source_get_last_rb (src, NULL, NULL, NULL, NULL, NULL, NULL, &round_trip);
+  g_return_val_if_fail (ssrcs != NULL && num_ssrcs > 0, FALSE);
+
+  rtp_source_get_last_rb (src, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      &round_trip);
 
   if (src->last_keyframe_request != GST_CLOCK_TIME_NONE && round_trip) {
     GstClockTime round_trip_in_ns = gst_util_uint64_scale (round_trip,
@@ -2749,14 +2801,17 @@ rtp_session_request_local_key_unit (RTPSession * sess, RTPSource * src,
 
   src->last_keyframe_request = current_time;
 
-  GST_LOG ("received %s request from %X about %X %p(%p)", fir ? "FIR" : "PLI",
-      rtp_source_get_ssrc (src), media_ssrc, sess->callbacks.process_rtp,
-      sess->callbacks.request_key_unit);
+  for (i = 0; i < num_ssrcs; ++i) {
+    GST_LOG ("received %s request from %X about %X %p(%p)",
+        fir ? "FIR" : "PLI",
+        rtp_source_get_ssrc (src), ssrcs[i], sess->callbacks.process_rtp,
+        sess->callbacks.request_key_unit);
 
-  RTP_SESSION_UNLOCK (sess);
-  sess->callbacks.request_key_unit (sess, media_ssrc, fir,
-      sess->request_key_unit_user_data);
-  RTP_SESSION_LOCK (sess);
+    RTP_SESSION_UNLOCK (sess);
+    sess->callbacks.request_key_unit (sess, ssrcs[i], fir,
+        sess->request_key_unit_user_data);
+    RTP_SESSION_LOCK (sess);
+  }
 
   return TRUE;
 }
@@ -2778,19 +2833,19 @@ rtp_session_process_pli (RTPSession * sess, guint32 sender_ssrc,
       return;
   }
 
-  rtp_session_request_local_key_unit (sess, src, media_ssrc, FALSE,
+  rtp_session_request_local_key_unit (sess, src, &media_ssrc, 1, FALSE,
       current_time);
 }
 
 static void
 rtp_session_process_fir (RTPSession * sess, guint32 sender_ssrc,
-    guint32 media_ssrc, guint8 * fci_data, guint fci_length,
-    GstClockTime current_time)
+    guint8 * fci_data, guint fci_length, GstClockTime current_time)
 {
   RTPSource *src;
   guint32 ssrc;
   guint position = 0;
-  gboolean our_request = FALSE;
+  guint32 ssrcs[32];
+  guint num_ssrcs = 0;
 
   if (!sess->callbacks.request_key_unit)
     return;
@@ -2828,15 +2883,14 @@ rtp_session_process_fir (RTPSession * sess, guint32 sender_ssrc,
     if (own == NULL)
       continue;
 
-    if (own->internal) {
-      our_request = TRUE;
-      break;
+    if (own->internal && num_ssrcs < 32) {
+      ssrcs[num_ssrcs++] = ssrc;
     }
   }
-  if (!our_request)
+  if (num_ssrcs == 0)
     return;
 
-  rtp_session_request_local_key_unit (sess, src, media_ssrc, TRUE,
+  rtp_session_request_local_key_unit (sess, src, ssrcs, num_ssrcs, TRUE,
       current_time);
 }
 
@@ -2866,6 +2920,34 @@ rtp_session_process_nack (RTPSession * sess, guint32 sender_ssrc,
     fci_data += 4;
     fci_length -= 4;
   }
+}
+
+static void
+rtp_session_process_sr_req (RTPSession * sess, guint32 sender_ssrc,
+    guint32 media_ssrc)
+{
+  RTPSource *src;
+
+  /* Request a new SR in feedback profiles ASAP */
+  if (sess->rtp_profile != GST_RTP_PROFILE_AVPF
+      && sess->rtp_profile != GST_RTP_PROFILE_SAVPF)
+    return;
+
+  src = find_source (sess, sender_ssrc);
+  /* Our own RTCP packet */
+  if (src && src->internal)
+    return;
+
+  src = find_source (sess, media_ssrc);
+  /* Not an SSRC we're producing */
+  if (!src || !src->internal)
+    return;
+
+  GST_DEBUG_OBJECT (sess, "Handling RTCP-SR-REQ");
+  /* FIXME: 5s max_delay hard-coded here as we have to give some
+   * high enough value */
+  sess->sr_req_pending = TRUE;
+  rtp_session_send_rtcp (sess, 5 * GST_SECOND);
 }
 
 static void
@@ -2973,8 +3055,8 @@ rtp_session_process_feedback (RTPSession * sess, GstRTCPPacket * packet,
           case GST_RTCP_PSFB_TYPE_FIR:
             if (src)
               src->stats.recv_fir_count++;
-            rtp_session_process_fir (sess, sender_ssrc, media_ssrc, fci_data,
-                fci_length, current_time);
+            rtp_session_process_fir (sess, sender_ssrc, fci_data, fci_length,
+                current_time);
             break;
           default:
             break;
@@ -2987,6 +3069,9 @@ rtp_session_process_feedback (RTPSession * sess, GstRTCPPacket * packet,
               src->stats.recv_nack_count++;
             rtp_session_process_nack (sess, sender_ssrc, media_ssrc,
                 fci_data, fci_length, current_time);
+            break;
+          case GST_RTCP_RTPFB_TYPE_RTCP_SR_REQ:
+            rtp_session_process_sr_req (sess, sender_ssrc, media_ssrc);
             break;
           case GST_RTCP_RTPFB_TYPE_TWCC:
             rtp_session_process_twcc (sess, sender_ssrc, media_ssrc,
@@ -3021,7 +3106,7 @@ rtp_session_process_rtcp (RTPSession * sess, GstBuffer * buffer,
     GstClockTime current_time, GstClockTime running_time, guint64 ntpnstime)
 {
   GstRTCPPacket packet;
-  gboolean more, is_bye = FALSE, do_sync = FALSE;
+  gboolean more, is_bye = FALSE, do_sync = FALSE, has_report = FALSE;
   RTPPacketInfo pinfo = { 0, };
   GstFlowReturn result = GST_FLOW_OK;
   GstRTCPBuffer rtcp = { NULL, };
@@ -3052,9 +3137,11 @@ rtp_session_process_rtcp (RTPSession * sess, GstBuffer * buffer,
 
     switch (type) {
       case GST_RTCP_TYPE_SR:
+        has_report = TRUE;
         rtp_session_process_sr (sess, &packet, &pinfo, &do_sync);
         break;
       case GST_RTCP_TYPE_RR:
+        has_report = TRUE;
         rtp_session_process_rr (sess, &packet, &pinfo);
         break;
       case GST_RTCP_TYPE_SDES:
@@ -3102,6 +3189,10 @@ rtp_session_process_rtcp (RTPSession * sess, GstBuffer * buffer,
       sess->stats.avg_rtcp_packet_size, pinfo.bytes);
   RTP_SESSION_UNLOCK (sess);
 
+  if (has_report) {
+    g_object_notify_by_pspec (G_OBJECT (sess), properties[PROP_STATS]);
+  }
+
   pinfo.data = NULL;
   clean_packet_info (&pinfo);
 
@@ -3121,29 +3212,6 @@ invalid_packet:
     gst_buffer_unref (buffer);
     return GST_FLOW_OK;
   }
-}
-
-static guint8
-_get_extmap_id_for_attribute (const GstStructure * s, const gchar * ext_name)
-{
-  guint i;
-  guint8 extmap_id = 0;
-  guint n_fields = gst_structure_n_fields (s);
-
-  for (i = 0; i < n_fields; i++) {
-    const gchar *field_name = gst_structure_nth_field_name (s, i);
-    if (g_str_has_prefix (field_name, "extmap-")) {
-      const gchar *str = gst_structure_get_string (s, field_name);
-      if (str && g_strcmp0 (str, ext_name) == 0) {
-        gint64 id = g_ascii_strtoll (field_name + 7, NULL, 10);
-        if (id > 0 && id < 15) {
-          extmap_id = id;
-          break;
-        }
-      }
-    }
-  }
-  return extmap_id;
 }
 
 /**
@@ -3176,7 +3244,7 @@ rtp_session_update_send_caps (RTPSession * sess, GstCaps * caps)
     sess->internal_ssrc_set = TRUE;
     sess->internal_ssrc_from_caps_or_property = TRUE;
     if (source) {
-      rtp_source_update_caps (source, caps);
+      rtp_source_update_send_caps (source, caps);
 
       if (created)
         on_new_sender_ssrc (sess, source);
@@ -3188,7 +3256,7 @@ rtp_session_update_send_caps (RTPSession * sess, GstCaps * caps)
       source =
           obtain_internal_source (sess, ssrc, &created, GST_CLOCK_TIME_NONE);
       if (source) {
-        rtp_source_update_caps (source, caps);
+        rtp_source_update_send_caps (source, caps);
 
         if (created)
           on_new_sender_ssrc (sess, source);
@@ -3201,28 +3269,150 @@ rtp_session_update_send_caps (RTPSession * sess, GstCaps * caps)
     sess->internal_ssrc_from_caps_or_property = FALSE;
   }
 
-  sess->twcc_send_ext_id = _get_extmap_id_for_attribute (s, TWCC_EXTMAP_STR);
-  if (sess->twcc_send_ext_id > 0) {
-    GST_INFO ("TWCC enabled for send using extension id: %u",
-        sess->twcc_send_ext_id);
+  sess->send_ntp64_ext_id =
+      gst_rtp_get_extmap_id_for_attribute (s,
+      GST_RTP_HDREXT_BASE GST_RTP_HDREXT_NTP_64);
+
+  rtp_twcc_manager_parse_send_ext_id (sess->twcc, s);
+}
+
+static void
+update_ntp64_header_ext_data (RTPPacketInfo * pinfo, GstBuffer * buffer)
+{
+  GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
+
+  if (gst_rtp_buffer_map (buffer, GST_MAP_READWRITE, &rtp)) {
+    guint16 bits;
+    guint8 *data;
+    guint wordlen;
+
+    if (gst_rtp_buffer_get_extension_data (&rtp, &bits, (gpointer *) & data,
+            &wordlen)) {
+      gsize len = wordlen * 4;
+
+      /* One-byte header */
+      if (bits == 0xBEDE) {
+        /* One-byte header extension */
+        while (TRUE) {
+          guint8 ext_id, ext_len;
+
+          if (len < 1)
+            break;
+
+          ext_id = GST_READ_UINT8 (data) >> 4;
+          ext_len = (GST_READ_UINT8 (data) & 0xF) + 1;
+          data += 1;
+          len -= 1;
+          if (ext_id == 0) {
+            /* Skip padding */
+            continue;
+          } else if (ext_id == 15) {
+            /* Stop parsing */
+            break;
+          }
+
+          /* extension doesn't fit into the header */
+          if (ext_len > len)
+            break;
+
+          if (ext_id == pinfo->ntp64_ext_id && ext_len == 8) {
+            if (pinfo->ntpnstime != GST_CLOCK_TIME_NONE) {
+              guint64 ntptime = gst_util_uint64_scale (pinfo->ntpnstime,
+                  G_GUINT64_CONSTANT (1) << 32,
+                  GST_SECOND);
+
+              GST_WRITE_UINT64_BE (data, ntptime);
+            } else {
+              /* Replace extension with padding */
+              memset (data - 1, 0, 1 + ext_len);
+            }
+          }
+
+          /* skip to the next extension */
+          data += ext_len;
+          len -= ext_len;
+        }
+      } else if ((bits >> 4) == 0x100) {
+        /* Two-byte header extension */
+
+        while (TRUE) {
+          guint8 ext_id, ext_len;
+
+          if (len < 1)
+            break;
+
+          ext_id = GST_READ_UINT8 (data);
+          data += 1;
+          len -= 1;
+          if (ext_id == 0) {
+            /* Skip padding */
+            continue;
+          }
+
+          ext_len = GST_READ_UINT8 (data);
+          data += 1;
+          len -= 1;
+
+          /* extension doesn't fit into the header */
+          if (ext_len > len)
+            break;
+
+          if (ext_id == pinfo->ntp64_ext_id && ext_len == 8) {
+            if (pinfo->ntpnstime != GST_CLOCK_TIME_NONE) {
+              guint64 ntptime = gst_util_uint64_scale (pinfo->ntpnstime,
+                  G_GUINT64_CONSTANT (1) << 32,
+                  GST_SECOND);
+
+              GST_WRITE_UINT64_BE (data, ntptime);
+            } else {
+              /* Replace extension with padding */
+              memset (data - 2, 0, 2 + ext_len);
+            }
+          }
+
+          /* skip to the next extension */
+          data += ext_len;
+          len -= ext_len;
+        }
+      }
+    }
+    gst_rtp_buffer_unmap (&rtp);
   }
 }
 
 static void
-send_twcc_packet (RTPSession * sess, RTPPacketInfo * pinfo)
+update_ntp64_header_ext (RTPPacketInfo * pinfo)
 {
-  gint32 twcc_seqnum;
-
-  if (sess->twcc_send_ext_id == 0)
+  /* Early return if we don't know the header extension id or the packets
+   * don't contain the header extension */
+  if (pinfo->ntp64_ext_id == 0 || !pinfo->have_ntp64_ext)
     return;
 
-  twcc_seqnum = packet_info_get_twcc_seqnum (pinfo, sess->twcc_send_ext_id);
-  if (twcc_seqnum == -1)
-    return;
+  /* If no NTP time is known then the header extension will be replaced with
+   * padding, otherwise it will be updated */
+  GST_TRACE
+      ("Updating NTP-64 header extension for SSRC %08x packet with RTP time %u and running time %"
+      GST_TIME_FORMAT " to %" GST_TIME_FORMAT, pinfo->ssrc, pinfo->rtptime,
+      GST_TIME_ARGS (pinfo->running_time), GST_TIME_ARGS (pinfo->ntpnstime));
 
-  rtp_twcc_manager_send_packet (sess->twcc, twcc_seqnum, pinfo);
+  if (GST_IS_BUFFER_LIST (pinfo->data)) {
+    GstBufferList *list;
+    guint i = 0;
+
+    pinfo->data = gst_buffer_list_make_writable (pinfo->data);
+
+    list = GST_BUFFER_LIST (pinfo->data);
+
+    for (i = 0; i < gst_buffer_list_length (list); i++) {
+      GstBuffer *buffer = gst_buffer_list_get_writable (list, i);
+
+      update_ntp64_header_ext_data (pinfo, buffer);
+    }
+  } else {
+    pinfo->data = gst_buffer_make_writable (pinfo->data);
+    update_ntp64_header_ext_data (pinfo, pinfo->data);
+  }
 }
-
 
 /**
  * rtp_session_send_rtp:
@@ -3239,7 +3429,7 @@ send_twcc_packet (RTPSession * sess, RTPPacketInfo * pinfo)
  */
 GstFlowReturn
 rtp_session_send_rtp (RTPSession * sess, gpointer data, gboolean is_list,
-    GstClockTime current_time, GstClockTime running_time)
+    GstClockTime current_time, GstClockTime running_time, guint64 ntpnstime)
 {
   GstFlowReturn result;
   RTPSource *source;
@@ -3255,10 +3445,14 @@ rtp_session_send_rtp (RTPSession * sess, gpointer data, gboolean is_list,
 
   RTP_SESSION_LOCK (sess);
   if (!update_packet_info (sess, &pinfo, TRUE, TRUE, is_list, data,
-          current_time, running_time, -1))
+          current_time, running_time, ntpnstime))
     goto invalid_packet;
 
-  send_twcc_packet (sess, &pinfo);
+  /* Update any 64-bit NTP header extensions with the actual NTP time here */
+  if (sess->update_ntp64_header_ext)
+    update_ntp64_header_ext (&pinfo);
+
+  rtp_twcc_manager_send_packet (sess->twcc, &pinfo);
 
   source = obtain_internal_source (sess, pinfo.ssrc, &created, current_time);
   if (created)
@@ -3281,13 +3475,15 @@ rtp_session_send_rtp (RTPSession * sess, gpointer data, gboolean is_list,
         GST_DEBUG ("Collision for SSRC %x, change our sender ssrc", pinfo.ssrc);
 
         rtp_session_have_conflict (sess, source, from, current_time);
-
-        goto collision;
       }
     } else {
       GST_LOG ("Ignoring collision on sent SSRC %x because remote source"
           " doesn't have an address", pinfo.ssrc);
     }
+
+    /* the the sending source is not internal, we have to drop the packet,
+       or else we will end up receving it ourselves! */
+    goto collision;
   }
 
   prevsender = RTP_SOURCE_IS_SENDER (source);
@@ -3611,13 +3807,13 @@ session_start_rtcp (RTPSession * sess, ReportData * data)
 
   gst_rtcp_buffer_map (data->rtcp, GST_MAP_READWRITE, rtcp);
 
-  if (data->is_early && sess->reduced_size_rtcp)
-    return;
-
-  if (RTP_SOURCE_IS_SENDER (own)) {
+  if (RTP_SOURCE_IS_SENDER (own) && (!data->is_early || !sess->reduced_size_rtcp
+          || sess->sr_req_pending)) {
     guint64 ntptime;
     guint32 rtptime;
     guint32 packet_count, octet_count;
+
+    sess->sr_req_pending = FALSE;
 
     /* we are a sender, create SR */
     GST_DEBUG ("create SR for SSRC %08x", own->ssrc);
@@ -3635,7 +3831,7 @@ session_start_rtcp (RTPSession * sess, ReportData * data)
         sess->timestamp_sender_reports ? ntptime : 0,
         sess->timestamp_sender_reports ? rtptime : 0,
         packet_count, octet_count);
-  } else {
+  } else if (!data->is_early || !sess->reduced_size_rtcp) {
     /* we are only receiver, create RR */
     GST_DEBUG ("create RR for SSRC %08x", own->ssrc);
     gst_rtcp_buffer_add_packet (rtcp, GST_RTCP_TYPE_RR, packet);
@@ -3694,6 +3890,7 @@ session_report_blocks (const gchar * key, RTPSource * source, ReportData * data)
 
   /* store last generated RR packet */
   source->last_rr.is_valid = TRUE;
+  source->last_rr.ssrc = data->source->ssrc;
   source->last_rr.fractionlost = fractionlost;
   source->last_rr.packetslost = packetslost;
   source->last_rr.exthighestseq = exthighestseq;
@@ -4002,7 +4199,8 @@ session_cleanup (const gchar * key, RTPSource * source, ReportData * data)
         /* this is an internal source that is not using our suggested ssrc.
          * since there must be another source using this ssrc, we can remove
          * this one instead of making it a receiver forever */
-        if (source->ssrc != sess->suggested_ssrc) {
+        if (source->ssrc != sess->suggested_ssrc
+            && source->media_ssrc != sess->suggested_ssrc) {
           rtp_source_mark_bye (source, "timed out");
           /* do not schedule bye here, since we are inside the RTCP timeout
            * processing and scheduling bye will interfere with SR/RR sending */
@@ -4283,6 +4481,8 @@ generate_twcc (const gchar * key, RTPSource * source, ReportData * data)
     return;
   }
 
+  GST_DEBUG ("generating TWCC feedback for source %08x", source->ssrc);
+
   while ((buf = rtp_twcc_manager_get_feedback (sess->twcc, source->ssrc))) {
     ReportOutput *output = g_slice_new (ReportOutput);
     output->source = g_object_ref (source);
@@ -4300,6 +4500,7 @@ generate_rtcp (const gchar * key, RTPSource * source, ReportData * data)
   RTPSession *sess = data->sess;
   gboolean is_bye = FALSE;
   ReportOutput *output;
+  gboolean sr_req_pending = sess->sr_req_pending;
 
   /* only generate RTCP for active internal sources */
   if (!source->internal || source->sent_bye)
@@ -4330,7 +4531,8 @@ generate_rtcp (const gchar * key, RTPSource * source, ReportData * data)
     g_hash_table_foreach (sess->ssrcs[sess->mask_idx],
         (GHFunc) session_report_blocks, data);
   }
-  if (!data->has_sdes && (!data->is_early || !sess->reduced_size_rtcp))
+  if (!data->has_sdes && (!data->is_early || !sess->reduced_size_rtcp
+          || sr_req_pending))
     session_sdes (sess, data);
 
   if (data->have_fir)
@@ -4510,20 +4712,27 @@ rtp_session_on_timeout (RTPSession * sess, GstClockTime current_time,
   /* check if all the buffers are empty after generation */
   all_empty = TRUE;
 
+  /* Make a local copy of the hashtable. We need to do this because the
+   * generate_rtcp stage below releases the session lock. */
+  table_copy = g_hash_table_new_full (NULL, NULL, NULL,
+      (GDestroyNotify) g_object_unref);
+  g_hash_table_foreach (sess->ssrcs[sess->mask_idx],
+      (GHFunc) clone_ssrcs_hashtable, table_copy);
+
   GST_DEBUG
       ("doing RTCP generation %u for %u sources, early %d, may suppress %d",
       sess->generation, data.num_to_report, data.is_early, data.may_suppress);
 
-  /* generate RTCP for all internal sources */
-  g_hash_table_foreach (sess->ssrcs[sess->mask_idx],
-      (GHFunc) generate_rtcp, &data);
+  /* generate RTCP for all internal sources, this might release the
+   * session lock. */
+  g_hash_table_foreach (table_copy, (GHFunc) generate_rtcp, &data);
 
-  g_hash_table_foreach (sess->ssrcs[sess->mask_idx],
-      (GHFunc) generate_twcc, &data);
+  g_hash_table_foreach (table_copy, (GHFunc) generate_twcc, &data);
 
   /* update the generation for all the sources that have been reported */
-  g_hash_table_foreach (sess->ssrcs[sess->mask_idx],
-      (GHFunc) update_generation, &data);
+  g_hash_table_foreach (table_copy, (GHFunc) update_generation, &data);
+
+  g_hash_table_destroy (table_copy);
 
   /* we keep track of the last report time in order to timeout inactive
    * receivers or senders */
@@ -4549,7 +4758,7 @@ done:
   RTP_SESSION_UNLOCK (sess);
 
   /* notify about updated statistics */
-  g_object_notify (G_OBJECT (sess), "stats");
+  g_object_notify_by_pspec (G_OBJECT (sess), properties[PROP_STATS]);
 
   /* push out the RTCP packets */
   while ((output = g_queue_pop_head (&data.output))) {
@@ -4916,10 +5125,5 @@ void
 rtp_session_update_recv_caps_structure (RTPSession * sess,
     const GstStructure * s)
 {
-  guint8 ext_id = _get_extmap_id_for_attribute (s, TWCC_EXTMAP_STR);
-  if (ext_id > 0) {
-    sess->twcc_recv_ext_id = ext_id;
-    GST_INFO ("TWCC enabled for recv using extension id: %u",
-        sess->twcc_recv_ext_id);
-  }
+  rtp_twcc_manager_parse_recv_ext_id (sess->twcc, s);
 }

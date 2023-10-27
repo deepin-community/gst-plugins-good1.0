@@ -43,6 +43,7 @@
 
 #include <gst/audio/audio.h>
 
+#include "gstflvelements.h"
 #include "gstflvmux.h"
 #include "amfdefs.h"
 
@@ -97,6 +98,8 @@ G_DEFINE_TYPE (GstFlvMuxPad, gst_flv_mux_pad, GST_TYPE_AGGREGATOR_PAD);
 #define gst_flv_mux_parent_class parent_class
 G_DEFINE_TYPE_WITH_CODE (GstFlvMux, gst_flv_mux, GST_TYPE_AGGREGATOR,
     G_IMPLEMENT_INTERFACE (GST_TYPE_TAG_SETTER, NULL));
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (flvmux, "flvmux",
+    GST_RANK_PRIMARY, GST_TYPE_FLV_MUX, flv_element_init (plugin));
 
 static GstFlowReturn
 gst_flv_mux_aggregate (GstAggregator * aggregator, gboolean timeout);
@@ -131,9 +134,7 @@ static GstFlowReturn gst_flv_mux_write_eos (GstFlvMux * mux);
 static GstFlowReturn gst_flv_mux_write_header (GstFlvMux * mux);
 static GstFlowReturn gst_flv_mux_rewrite_header (GstFlvMux * mux);
 static gboolean gst_flv_mux_are_all_pads_eos (GstFlvMux * mux);
-static GstFlowReturn gst_flv_mux_update_src_caps (GstAggregator * aggregator,
-    GstCaps * caps, GstCaps ** ret);
-static guint64 gst_flv_mux_query_upstream_duration (GstFlvMux * mux);
+static GstClockTime gst_flv_mux_query_upstream_duration (GstFlvMux * mux);
 static GstClockTime gst_flv_mux_segment_to_running_time (const GstSegment *
     segment, GstClockTime t);
 
@@ -143,8 +144,8 @@ gst_flv_mux_pad_flush (GstAggregatorPad * pad, GstAggregator * aggregator)
   GstFlvMuxPad *flvpad = GST_FLV_MUX_PAD (pad);
 
   flvpad->last_timestamp = GST_CLOCK_TIME_NONE;
-  flvpad->pts = GST_CLOCK_STIME_NONE;
-  flvpad->dts = GST_CLOCK_STIME_NONE;
+  flvpad->pts = GST_CLOCK_TIME_NONE;
+  flvpad->dts = GST_CLOCK_TIME_NONE;
 
   return GST_FLOW_OK;
 }
@@ -300,8 +301,7 @@ gst_flv_mux_class_init (GstFlvMuxClass * klass)
   gstaggregator_class->flush = GST_DEBUG_FUNCPTR (gst_flv_mux_flush);
   gstaggregator_class->get_next_time =
       GST_DEBUG_FUNCPTR (gst_flv_mux_get_next_time);
-  gstaggregator_class->update_src_caps =
-      GST_DEBUG_FUNCPTR (gst_flv_mux_update_src_caps);
+  gstaggregator_class->negotiate = NULL;
 
   gst_element_class_add_static_pad_template_with_gtype (gstelement_class,
       &videosink_templ, GST_TYPE_FLV_MUX_PAD);
@@ -385,7 +385,7 @@ gst_flv_mux_reset (GstElement * element)
 
   mux->duration = GST_CLOCK_TIME_NONE;
   mux->new_tags = FALSE;
-  mux->first_timestamp = GST_CLOCK_STIME_NONE;
+  mux->first_timestamp = GST_CLOCK_TIME_NONE;
   mux->last_dts = 0;
 
   mux->state = GST_FLV_MUX_STATE_HEADER;
@@ -801,12 +801,6 @@ gst_flv_mux_release_pad (GstElement * element, GstPad * pad)
 static GstFlowReturn
 gst_flv_mux_push (GstFlvMux * mux, GstBuffer * buffer)
 {
-  GstAggregator *agg = GST_AGGREGATOR (mux);
-  GstAggregatorPad *srcpad = GST_AGGREGATOR_PAD (agg->srcpad);
-
-  if (GST_BUFFER_PTS_IS_VALID (buffer))
-    srcpad->segment.position = GST_BUFFER_PTS (buffer);
-
   /* pushing the buffer that rewrites the header will make it no longer be the
    * total output size in bytes, but it doesn't matter at that point */
   mux->byte_count += gst_buffer_get_size (buffer);
@@ -902,7 +896,7 @@ gst_flv_mux_create_metadata (GstFlvMux * mux)
   dts = mux->last_dts;
 
   /* Timestamp must start at zero */
-  if (GST_CLOCK_STIME_IS_VALID (mux->first_timestamp)) {
+  if (GST_CLOCK_TIME_IS_VALID (mux->first_timestamp)) {
     dts -= mux->first_timestamp / GST_MSECOND;
   }
 
@@ -971,7 +965,7 @@ gst_flv_mux_create_metadata (GstFlvMux * mux)
   for (i = 0; tags && i < n_tags; i++) {
     const gchar *tag_name = gst_tag_list_nth_tag_name (tags, i);
     if (!strcmp (tag_name, GST_TAG_DURATION)) {
-      guint64 dur;
+      GstClockTime dur;
 
       if (!gst_tag_list_get_uint64 (tags, GST_TAG_DURATION, &dur))
         continue;
@@ -1215,7 +1209,7 @@ gst_flv_mux_buffer_to_tag_internal (GstFlvMux * mux, GstBuffer * buffer,
   guint8 *data, *bdata = NULL;
   gsize bsize = 0;
 
-  if (GST_CLOCK_STIME_IS_VALID (pad->dts)) {
+  if (GST_CLOCK_TIME_IS_VALID (pad->dts)) {
     pts = pad->pts / GST_MSECOND;
     dts = pad->dts / GST_MSECOND;
     GST_LOG_OBJECT (mux,
@@ -1258,7 +1252,7 @@ gst_flv_mux_buffer_to_tag_internal (GstFlvMux * mux, GstBuffer * buffer,
     cts = 0;
 
   /* Timestamp must start at zero */
-  if (GST_CLOCK_STIME_IS_VALID (mux->first_timestamp)) {
+  if (GST_CLOCK_TIME_IS_VALID (mux->first_timestamp)) {
     dts -= mux->first_timestamp / GST_MSECOND;
     pts = dts + cts;
   }
@@ -1660,6 +1654,8 @@ gst_flv_mux_write_buffer (GstFlvMux * mux, GstFlvMuxPad * pad,
 {
   GstBuffer *tag;
   GstFlowReturn ret;
+  GstClockTime pts = GST_BUFFER_PTS (buffer);
+  GstClockTime duration = GST_BUFFER_DURATION (buffer);
   GstClockTime dts =
       gst_flv_mux_segment_to_running_time (&GST_AGGREGATOR_PAD (pad)->segment,
       GST_BUFFER_DTS (buffer));
@@ -1677,6 +1673,14 @@ gst_flv_mux_write_buffer (GstFlvMux * mux, GstFlvMuxPad * pad,
 
   if (ret == GST_FLOW_OK && GST_CLOCK_TIME_IS_VALID (dts))
     pad->last_timestamp = dts;
+
+  if (ret == GST_FLOW_OK && GST_CLOCK_TIME_IS_VALID (pts)) {
+    GstAggregator *agg = GST_AGGREGATOR (mux);
+    GstAggregatorPad *srcpad = GST_AGGREGATOR_PAD (agg->srcpad);
+    srcpad->segment.position = pts;
+    if (GST_CLOCK_TIME_IS_VALID (duration))
+      srcpad->segment.position += duration;
+  }
 
   return ret;
 }
@@ -1715,7 +1719,7 @@ static gboolean
 duration_query_cb (GstElement * element, GstPad * pad,
     struct DurationData *data)
 {
-  guint64 dur;
+  GstClockTime dur;
 
   if (gst_pad_peer_query_duration (GST_PAD (pad), GST_FORMAT_TIME,
           (gint64 *) & dur) && dur != GST_CLOCK_TIME_NONE) {
@@ -1728,7 +1732,7 @@ duration_query_cb (GstElement * element, GstPad * pad,
   return TRUE;
 }
 
-static guint64
+static GstClockTime
 gst_flv_mux_query_upstream_duration (GstFlvMux * mux)
 {
   struct DurationData cb_data = { GST_CLOCK_TIME_NONE };
@@ -1988,8 +1992,8 @@ static GstFlowReturn
 gst_flv_mux_aggregate (GstAggregator * aggregator, gboolean timeout)
 {
   GstFlvMux *mux = GST_FLV_MUX (aggregator);
-  GstFlvMuxPad *best;
-  gint64 best_time = GST_CLOCK_STIME_NONE;
+  GstFlvMuxPad *best = NULL;
+  GstClockTime best_time = GST_CLOCK_TIME_NONE;
   GstFlowReturn ret;
   GstClockTime ts;
   GstBuffer *buffer = NULL;
@@ -1998,27 +2002,25 @@ gst_flv_mux_aggregate (GstAggregator * aggregator, gboolean timeout)
     if (GST_ELEMENT_CAST (mux)->sinkpads == NULL) {
       GST_ELEMENT_ERROR (mux, STREAM, MUX, (NULL),
           ("No input streams configured"));
-      return GST_FLOW_ERROR;
+      ret = GST_FLOW_ERROR;
+      goto out;
     }
 
     best = gst_flv_mux_find_best_pad (aggregator, &ts, timeout);
     if (!best) {
-      if (!gst_flv_mux_are_all_pads_eos (mux))
-        return GST_AGGREGATOR_FLOW_NEED_DATA;
-      else
-        return GST_FLOW_OK;
+      ret = GST_AGGREGATOR_FLOW_NEED_DATA;
+      goto out;
     }
 
     ret = gst_flv_mux_write_header (mux);
     if (ret != GST_FLOW_OK) {
-      gst_object_unref (best);
-      return ret;
+      goto out;
     }
 
     mux->state = GST_FLV_MUX_STATE_DATA;
 
-    if (!mux->streamable || mux->first_timestamp == GST_CLOCK_STIME_NONE) {
-      if (best && GST_CLOCK_STIME_IS_VALID (ts))
+    if (!mux->streamable || mux->first_timestamp == GST_CLOCK_TIME_NONE) {
+      if (best && GST_CLOCK_TIME_IS_VALID (ts))
         mux->first_timestamp = ts;
       else
         mux->first_timestamp = 0;
@@ -2031,8 +2033,8 @@ gst_flv_mux_aggregate (GstAggregator * aggregator, gboolean timeout)
     buffer = gst_aggregator_pad_pop_buffer (GST_AGGREGATOR_PAD (best));
     if (!buffer) {
       /* We might have gotten a flush event after we picked the pad */
-      gst_object_unref (best);
-      return GST_AGGREGATOR_FLOW_NEED_DATA;
+      ret = GST_AGGREGATOR_FLOW_NEED_DATA;
+      goto out;
     }
   }
 
@@ -2048,7 +2050,7 @@ gst_flv_mux_aggregate (GstAggregator * aggregator, gboolean timeout)
         gst_flv_mux_segment_to_running_time (&GST_AGGREGATOR_PAD
         (best)->segment, GST_BUFFER_DTS_OR_PTS (buffer));
 
-    if (GST_CLOCK_STIME_IS_VALID (best->dts))
+    if (GST_CLOCK_TIME_IS_VALID (best->dts))
       best_time = best->dts - mux->first_timestamp;
 
     if (GST_BUFFER_PTS_IS_VALID (buffer))
@@ -2058,41 +2060,38 @@ gst_flv_mux_aggregate (GstAggregator * aggregator, gboolean timeout)
     else
       best->pts = best->dts;
 
-    GST_LOG_OBJECT (best, "got buffer PTS %" GST_TIME_FORMAT " DTS %"
-        GST_STIME_FORMAT, GST_TIME_ARGS (best->pts),
-        GST_STIME_ARGS (best->dts));
-  } else {
-    if (!gst_flv_mux_are_all_pads_eos (mux))
-      return GST_AGGREGATOR_FLOW_NEED_DATA;
-    best_time = GST_CLOCK_STIME_NONE;
+    GST_LOG_OBJECT (best,
+        "got buffer PTS %" GST_TIME_FORMAT " DTS %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (best->pts), GST_TIME_ARGS (best->dts));
   }
 
   /* The FLV timestamp is an int32 field. For non-live streams error out if a
      bigger timestamp is seen, for live the timestamp will get wrapped in
      gst_flv_mux_buffer_to_tag */
-  if (!mux->streamable && (GST_CLOCK_STIME_IS_VALID (best_time))
+  if (!mux->streamable && (GST_CLOCK_TIME_IS_VALID (best_time))
       && best_time / GST_MSECOND > G_MAXINT32) {
     GST_WARNING_OBJECT (mux, "Timestamp larger than FLV supports - EOS");
-    if (buffer) {
-      gst_buffer_unref (buffer);
-      buffer = NULL;
-    }
-    gst_object_unref (best);
-    best = NULL;
+    ret = GST_FLOW_EOS;
+    goto out;
   }
 
   if (best) {
-    GstFlowReturn ret = gst_flv_mux_write_buffer (mux, best, buffer);
-    gst_object_unref (best);
-    return ret;
+    ret = gst_flv_mux_write_buffer (mux, best, g_steal_pointer (&buffer));
+  } else if (gst_flv_mux_are_all_pads_eos (mux)) {
+    ret = GST_FLOW_EOS;
   } else {
-    if (gst_flv_mux_are_all_pads_eos (mux)) {
-      gst_flv_mux_write_eos (mux);
-      gst_flv_mux_rewrite_header (mux);
-      return GST_FLOW_EOS;
-    }
-    return GST_FLOW_OK;
+    ret = GST_AGGREGATOR_FLOW_NEED_DATA;
   }
+
+out:
+  if (ret == GST_FLOW_EOS) {
+    gst_flv_mux_write_eos (mux);
+    gst_flv_mux_rewrite_header (mux);
+  }
+
+  g_clear_pointer (&buffer, gst_buffer_unref);
+  g_clear_pointer (&best, gst_object_unref);
+  return ret;
 }
 
 static void
@@ -2186,15 +2185,4 @@ gst_flv_mux_get_next_time (GstAggregator * aggregator)
 wait_for_data:
   GST_OBJECT_UNLOCK (aggregator);
   return GST_CLOCK_TIME_NONE;
-}
-
-static GstFlowReturn
-gst_flv_mux_update_src_caps (GstAggregator * aggregator,
-    GstCaps * caps, GstCaps ** ret)
-{
-  GstFlvMux *mux = GST_FLV_MUX (aggregator);
-
-  *ret = gst_flv_mux_prepare_src_caps (mux, NULL, NULL, NULL, NULL);
-
-  return GST_FLOW_OK;
 }

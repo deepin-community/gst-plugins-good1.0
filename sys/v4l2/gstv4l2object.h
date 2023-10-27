@@ -68,8 +68,8 @@ typedef enum {
   GST_V4L2_IO_DMABUF_IMPORT = 5
 } GstV4l2IOMode;
 
-typedef gboolean  (*GstV4l2GetInOutFunction)  (GstV4l2Object * v4l2object, gint * input);
-typedef gboolean  (*GstV4l2SetInOutFunction)  (GstV4l2Object * v4l2object, gint input);
+typedef gboolean  (*GstV4l2GetInOutFunction)  (GstV4l2Object * v4l2object, guint32 * input);
+typedef gboolean  (*GstV4l2SetInOutFunction)  (GstV4l2Object * v4l2object, guint32 input);
 typedef gboolean  (*GstV4l2UpdateFpsFunction) (GstV4l2Object * v4l2object);
 
 /* On Android NDK r18b the ioctl() signature uses 'unsigned' instead of
@@ -134,9 +134,11 @@ struct _GstV4l2Object {
   /* the video-device's file descriptor */
   gint video_fd;
   GstV4l2IOMode mode;
+  GstPoll *poll;
+  GstPollFD pollfd;
+  gboolean can_poll_device;
 
   gboolean active;
-  gboolean streaming;
 
   /* the current format */
   struct v4l2_fmtdesc *fmtdesc;
@@ -144,6 +146,7 @@ struct _GstV4l2Object {
   GstVideoInfo info;
   GstVideoAlignment align;
   GstVideoTransferFunction transfer;
+  gsize plane_size[GST_VIDEO_MAX_PLANES];
 
   /* Features */
   gboolean need_video_meta;
@@ -287,9 +290,6 @@ GstCaps*     gst_v4l2_object_get_raw_caps (void);
 
 GstCaps*     gst_v4l2_object_get_codec_caps (void);
 
-gint         gst_v4l2_object_extrapolate_stride (const GstVideoFormatInfo * finfo,
-                                                  gint plane, gint stride);
-
 gboolean     gst_v4l2_object_set_format  (GstV4l2Object * v4l2object, GstCaps * caps, GstV4l2Error * error);
 gboolean     gst_v4l2_object_try_format  (GstV4l2Object * v4l2object, GstCaps * caps, GstV4l2Error * error);
 gboolean     gst_v4l2_object_try_import  (GstV4l2Object * v4l2object, GstBuffer * buffer);
@@ -308,13 +308,25 @@ GstCaps *    gst_v4l2_object_get_caps    (GstV4l2Object * v4l2object, GstCaps * 
 
 gboolean     gst_v4l2_object_acquire_format (GstV4l2Object * v4l2object, GstVideoInfo * info);
 
-gboolean     gst_v4l2_object_set_crop    (GstV4l2Object * obj);
+gboolean     gst_v4l2_object_setup_padding (GstV4l2Object * obj);
 
 gboolean     gst_v4l2_object_decide_allocation (GstV4l2Object * v4l2object, GstQuery * query);
 
 gboolean     gst_v4l2_object_propose_allocation (GstV4l2Object * obj, GstQuery * query);
 
+GstBufferPool * gst_v4l2_object_get_buffer_pool (GstV4l2Object * v4l2object);
+
 GstStructure * gst_v4l2_object_v4l2fourcc_to_structure (guint32 fourcc);
+
+GstFlowReturn  gst_v4l2_object_poll (GstV4l2Object * v4l2object, GstClockTime timeout);
+gboolean       gst_v4l2_object_subscribe_event (GstV4l2Object * v4l2object, guint32 event);
+
+gboolean     gst_v4l2_object_is_raw (GstV4l2Object * obj);
+
+/* crop / compose */
+gboolean     gst_v4l2_object_set_crop (GstV4l2Object * obj, struct v4l2_rect *result);
+gboolean     gst_v4l2_object_get_crop_bounds (GstV4l2Object * obj, struct v4l2_rect *bounds);
+gboolean     gst_v4l2_object_get_crop_default (GstV4l2Object * obj, struct v4l2_rect *bounds);
 
 /* TODO Move to proper namespace */
 /* open/close the device */
@@ -325,10 +337,15 @@ gboolean     gst_v4l2_close          (GstV4l2Object * v4l2object);
 /* norm/input/output */
 gboolean     gst_v4l2_get_norm       (GstV4l2Object * v4l2object, v4l2_std_id * norm);
 gboolean     gst_v4l2_set_norm       (GstV4l2Object * v4l2object, v4l2_std_id norm);
-gboolean     gst_v4l2_get_input      (GstV4l2Object * v4l2object, gint * input);
-gboolean     gst_v4l2_set_input      (GstV4l2Object * v4l2object, gint input);
-gboolean     gst_v4l2_get_output     (GstV4l2Object * v4l2object, gint * output);
-gboolean     gst_v4l2_set_output     (GstV4l2Object * v4l2object, gint output);
+gboolean     gst_v4l2_get_input      (GstV4l2Object * v4l2object, guint32 * input);
+gboolean     gst_v4l2_set_input      (GstV4l2Object * v4l2object, guint32 input);
+gboolean     gst_v4l2_query_input    (GstV4l2Object * v4l2object, struct v4l2_input * input);
+gboolean     gst_v4l2_get_output     (GstV4l2Object * v4l2object, guint32 * output);
+gboolean     gst_v4l2_set_output     (GstV4l2Object * v4l2object, guint32 output);
+
+/* dv timings */
+gboolean     gst_v4l2_set_dv_timings   (GstV4l2Object * v4l2object, struct v4l2_dv_timings *timings);
+gboolean     gst_v4l2_query_dv_timings (GstV4l2Object * v4l2object, struct v4l2_dv_timings *timings);
 
 /* frequency control */
 gboolean     gst_v4l2_get_frequency   (GstV4l2Object * v4l2object, gint tunernum, gulong * frequency);
@@ -340,6 +357,10 @@ gboolean     gst_v4l2_get_attribute   (GstV4l2Object * v4l2object, int attribute
 gboolean     gst_v4l2_set_attribute   (GstV4l2Object * v4l2object, int attribute, const int value);
 gboolean     gst_v4l2_set_string_attribute (GstV4l2Object * v4l2object, int attribute_num, const char *value);
 gboolean     gst_v4l2_set_controls    (GstV4l2Object * v4l2object, GstStructure * controls);
+
+/* events */
+gboolean     gst_v4l2_subscribe_event (GstV4l2Object * v4l2object, guint32 event, guint32 id);
+gboolean     gst_v4l2_dequeue_event   (GstV4l2Object * v4l2object, struct v4l2_event *event);
 
 G_END_DECLS
 

@@ -59,8 +59,9 @@
 #include "gstv4l2tuner.h"
 #include "gstv4l2vidorient.h"
 
+#include "gstv4l2elements.h"
 #include "gstv4l2sink.h"
-#include "gst/gst-i18n-plugin.h"
+#include <glib/gi18n-lib.h>
 
 #include <string.h>
 
@@ -95,7 +96,8 @@ G_DEFINE_TYPE_WITH_CODE (GstV4l2Sink, gst_v4l2sink, GST_TYPE_VIDEO_SINK,
         gst_v4l2sink_color_balance_interface_init);
     G_IMPLEMENT_INTERFACE (GST_TYPE_VIDEO_ORIENTATION,
         gst_v4l2sink_video_orientation_interface_init));
-
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (v4l2sink,
+    "v4l2sink", GST_RANK_NONE, GST_TYPE_V4L2SINK, v4l2_element_init (plugin));
 
 static void gst_v4l2sink_finalize (GstV4l2Sink * v4l2sink);
 
@@ -585,11 +587,11 @@ gst_v4l2sink_show_frame (GstVideoSink * vsink, GstBuffer * buf)
   GstFlowReturn ret;
   GstV4l2Sink *v4l2sink = GST_V4L2SINK (vsink);
   GstV4l2Object *obj = v4l2sink->v4l2object;
-  GstBufferPool *bpool = GST_BUFFER_POOL (obj->pool);
+  GstBufferPool *bpool = gst_v4l2_object_get_buffer_pool (obj);
 
   GST_DEBUG_OBJECT (v4l2sink, "render buffer: %p", buf);
 
-  if (G_UNLIKELY (obj->pool == NULL))
+  if (G_UNLIKELY (bpool == NULL))
     goto not_negotiated;
 
   if (G_UNLIKELY (!gst_buffer_pool_is_active (bpool))) {
@@ -609,14 +611,16 @@ gst_v4l2sink_show_frame (GstVideoSink * vsink, GstBuffer * buf)
 
   gst_buffer_ref (buf);
 again:
-  ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL_CAST (obj->pool),
-      &buf);
+  ret = gst_v4l2_buffer_pool_process (GST_V4L2_BUFFER_POOL_CAST (bpool),
+      &buf, NULL);
   if (ret == GST_FLOW_FLUSHING) {
     ret = gst_base_sink_wait_preroll (GST_BASE_SINK (vsink));
     if (ret == GST_FLOW_OK)
       goto again;
   }
   gst_buffer_unref (buf);
+  if (bpool)
+    gst_object_unref (bpool);
 
   return ret;
 
@@ -631,6 +635,8 @@ activate_failed:
     GST_ELEMENT_ERROR (v4l2sink, RESOURCE, SETTINGS,
         (_("Failed to allocated required memory.")),
         ("Buffer pool activation failed"));
+    if (bpool)
+      gst_object_unref (bpool);
     return GST_FLOW_ERROR;
   }
 }

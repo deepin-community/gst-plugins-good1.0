@@ -27,6 +27,7 @@
 #include "config.h"
 #endif
 
+#include "gstqtelements.h"
 #include "gstqtsrc.h"
 #include <QtGui/QGuiApplication>
 
@@ -53,6 +54,7 @@ static GstStateChangeReturn gst_qt_src_change_state (GstElement * element,
     GstStateChange transition);
 static gboolean gst_qt_src_start (GstBaseSrc * basesrc);
 static gboolean gst_qt_src_stop (GstBaseSrc * basesrc);
+static gboolean gst_qt_src_unlock(GstBaseSrc *basesrc);
 
 static GstStaticPadTemplate gst_qt_src_template =
 GST_STATIC_PAD_TEMPLATE ("src",
@@ -76,6 +78,8 @@ enum
 G_DEFINE_TYPE_WITH_CODE (GstQtSrc, gst_qt_src,
     GST_TYPE_PUSH_SRC, GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT,
         "qtsrc", 0, "Qt Video Src"));
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (qmlglsrc, "qmlglsrc",
+    GST_RANK_NONE, GST_TYPE_QT_SRC, qt5_element_init (plugin));
 
 static const gfloat vertical_flip_matrix[] = {
   1.0f, 0.0f, 0.0f, 0.0f,
@@ -120,6 +124,7 @@ gst_qt_src_class_init (GstQtSrcClass * klass)
   gstbasesrc_class->query = gst_qt_src_query;
   gstbasesrc_class->start = gst_qt_src_start;
   gstbasesrc_class->stop = gst_qt_src_stop;
+  gstbasesrc_class->unlock = gst_qt_src_unlock;
   gstbasesrc_class->decide_allocation = gst_qt_src_decide_allocation;
 
   gstpushsrc_class->fill = gst_qt_src_fill;
@@ -287,8 +292,12 @@ gst_qt_src_query (GstBaseSrc * bsrc, GstQuery * query)
         return FALSE;
 
       if (!qt_src->display && !qt_src->qt_context) {
-        qt_src->display = qt_window_get_display (qt_src->window);
-        qt_src->qt_context = qt_window_get_qt_context (qt_src->window);
+        if (!qt_src->display)
+          qt_src->display = qt_window_get_display (qt_src->window);
+        if (!qt_src->qt_context)
+          qt_src->qt_context = qt_window_get_qt_context (qt_src->window);
+        if (!qt_src->context)
+          qt_src->context = qt_window_get_context (qt_src->window);
       }
 
       if (gst_gl_handle_context_query ((GstElement *) qt_src, query,
@@ -362,6 +371,9 @@ gst_qt_src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
   }
 
   if (!qt_src->context && !_find_local_gl_context (qt_src))
+    return FALSE;
+
+  if (!qt_window_set_context (qt_src->window, qt_src->context))
     return FALSE;
 
   if (!pool) {
@@ -529,6 +541,7 @@ gst_qt_src_start (GstBaseSrc * basesrc)
 
   qt_src->display = qt_window_get_display (qt_src->window);
   qt_src->qt_context = qt_window_get_qt_context (qt_src->window);
+  qt_src->context = qt_window_get_context (qt_src->window);
 
   if (!qt_src->display || !qt_src->qt_context) {
     GST_ERROR_OBJECT (qt_src,
@@ -538,6 +551,15 @@ gst_qt_src_start (GstBaseSrc * basesrc)
 
   GST_DEBUG_OBJECT (qt_src, "Got qt display %p and qt gl context %p",
       qt_src->display, qt_src->qt_context);
+  return TRUE;
+}
+
+static gboolean
+gst_qt_src_unlock(GstBaseSrc *basesrc)
+{
+  GstQtSrc *qt_src = GST_QT_SRC (basesrc);
+  if (qt_src->window)
+    qt_window_stop (qt_src->window);
   return TRUE;
 }
 

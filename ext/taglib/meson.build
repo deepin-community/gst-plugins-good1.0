@@ -1,6 +1,7 @@
 taglib_sources = [
   'gstapev2mux.cc',
   'gstid3v2mux.cc',
+  'gsttaglibelement.c',
   'gsttaglibplugin.c',
 ]
 
@@ -25,6 +26,5 @@ if taglib_dep.found() and add_languages('cpp', native: false, required: get_opti
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gsttaglib, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gsttaglib]
 endif

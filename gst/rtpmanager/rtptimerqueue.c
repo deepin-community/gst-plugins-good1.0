@@ -304,6 +304,8 @@ rtp_timer_queue_finalize (GObject * object)
     rtp_timer_free (timer);
   g_hash_table_unref (queue->hashtable);
   g_assert (queue->timers.length == 0);
+
+  G_OBJECT_CLASS (rtp_timer_queue_parent_class)->finalize (object);
 }
 
 static void
@@ -582,8 +584,6 @@ rtp_timer_queue_set_timer (RtpTimerQueue * queue, RtpTimerType type,
   if (!timer->queued || timer->seqnum != seqnum) {
     if (type == RTP_TIMER_EXPECTED) {
       timer->rtx_base = timeout;
-      timer->rtx_delay = delay;
-      timer->rtx_retry = 0;
     }
 
     timer->rtx_last = GST_CLOCK_TIME_NONE;
@@ -702,11 +702,9 @@ rtp_timer_queue_update_timer (RtpTimerQueue * queue, RtpTimer * timer,
   g_return_if_fail (timer != NULL);
 
   if (reset) {
-    GST_DEBUG ("reset rtx delay %" GST_TIME_FORMAT "->%" GST_TIME_FORMAT,
-        GST_TIME_ARGS (timer->rtx_delay), GST_TIME_ARGS (delay));
+    GST_DEBUG ("reset rtx base %" GST_TIME_FORMAT "->%" GST_TIME_FORMAT,
+        GST_TIME_ARGS (timer->rtx_base), GST_TIME_ARGS (timeout));
     timer->rtx_base = timeout;
-    timer->rtx_delay = delay;
-    timer->rtx_retry = 0;
   }
 
   if (timer->seqnum != seqnum) {

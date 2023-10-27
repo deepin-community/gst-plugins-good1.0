@@ -1,4 +1,5 @@
 pulse_sources = [
+  'gstpulseelement.c',
   'plugin.c',
   'pulsesink.c',
   'pulsesrc.c',
@@ -17,6 +18,5 @@ if libpulse_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstpulse, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstpulse]
 endif

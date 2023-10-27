@@ -26,6 +26,7 @@
 #include <gst/base/gstbitreader.h>
 #include <gst/rtp/gstrtpbuffer.h>
 
+#include "gstrtpelements.h"
 #include "gstrtpmp4gpay.h"
 #include "gstrtputils.h"
 
@@ -88,6 +89,8 @@ static gboolean gst_rtp_mp4g_pay_sink_event (GstRTPBasePayload * payload,
 
 #define gst_rtp_mp4g_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpMP4GPay, gst_rtp_mp4g_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtpmp4gpay, "rtpmp4gpay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_MP4G_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_mp4g_pay_class_init (GstRtpMP4GPayClass * klass)
@@ -531,6 +534,8 @@ gst_rtp_mp4g_pay_flush (GstRtpMP4GPay * rtpmp4gpay)
 
     /* marker only if the packet is complete */
     gst_rtp_buffer_set_marker (&rtp, avail <= payload_len);
+    if (avail <= payload_len)
+      GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
 
     gst_rtp_buffer_unmap (&rtp);
 
@@ -631,11 +636,4 @@ gst_rtp_mp4g_pay_change_state (GstElement * element, GstStateChange transition)
   }
 
   return ret;
-}
-
-gboolean
-gst_rtp_mp4g_pay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtpmp4gpay",
-      GST_RANK_SECONDARY, GST_TYPE_RTP_MP4G_PAY);
 }

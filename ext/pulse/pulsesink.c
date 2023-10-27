@@ -53,12 +53,13 @@
 #include <gst/base/gstbasesink.h>
 #include <gst/gsttaglist.h>
 #include <gst/audio/audio.h>
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 
 #include <gst/pbutils/pbutils.h>        /* only used for GST_PLUGINS_BASE_VERSION_* */
 
 #include <gst/glib-compat-private.h>
 
+#include "gstpulseelements.h"
 #include "pulsesink.h"
 #include "pulseutil.h"
 
@@ -322,6 +323,7 @@ gst_pulsering_destroy_stream (GstPulseRingBuffer * pbuf)
     pa_stream_set_write_callback (pbuf->stream, NULL, NULL);
     pa_stream_set_underflow_callback (pbuf->stream, NULL, NULL);
     pa_stream_set_overflow_callback (pbuf->stream, NULL, NULL);
+    pa_stream_set_latency_update_callback (pbuf->stream, NULL, NULL);
 
     pa_stream_unref (pbuf->stream);
     pbuf->stream = NULL;
@@ -1820,6 +1822,8 @@ G_DEFINE_TYPE_WITH_CODE (GstPulseSink, gst_pulsesink, GST_TYPE_AUDIO_BASE_SINK,
     gst_pulsesink_init_contexts ();
     G_IMPLEMENT_INTERFACE (GST_TYPE_STREAM_VOLUME, NULL)
     );
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (pulsesink, "pulsesink",
+    GST_RANK_PRIMARY + 10, GST_TYPE_PULSESINK, pulse_element_init (plugin));
 
 static GstAudioRingBuffer *
 gst_pulsesink_create_ringbuffer (GstAudioBaseSink * sink)
