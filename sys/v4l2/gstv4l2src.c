@@ -54,13 +54,14 @@
 #include <gst/video/gstvideometa.h>
 #include <gst/video/gstvideopool.h>
 
+#include "gstv4l2elements.h"
 #include "gstv4l2src.h"
 
 #include "gstv4l2colorbalance.h"
 #include "gstv4l2tuner.h"
 #include "gstv4l2vidorient.h"
 
-#include "gst/gst-i18n-plugin.h"
+#include <glib/gi18n-lib.h>
 
 GST_DEBUG_CATEGORY (v4l2src_debug);
 #define GST_CAT_DEFAULT v4l2src_debug
@@ -71,6 +72,11 @@ enum
 {
   PROP_0,
   V4L2_STD_OBJECT_PROPS,
+  PROP_CROP_TOP,
+  PROP_CROP_LEFT,
+  PROP_CROP_BOTTOM,
+  PROP_CROP_RIGHT,
+  PROP_CROP_BOUNDS,
   PROP_LAST
 };
 
@@ -98,6 +104,16 @@ G_DEFINE_TYPE_WITH_CODE (GstV4l2Src, gst_v4l2src, GST_TYPE_PUSH_SRC,
         gst_v4l2src_color_balance_interface_init);
     G_IMPLEMENT_INTERFACE (GST_TYPE_VIDEO_ORIENTATION,
         gst_v4l2src_video_orientation_interface_init));
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (v4l2src,
+    "v4l2src", GST_RANK_PRIMARY, GST_TYPE_V4L2SRC, v4l2_element_init (plugin));
+
+struct PreferredCapsInfo
+{
+  gint width;
+  gint height;
+  gint fps_n;
+  gint fps_d;
+};
 
 static void gst_v4l2src_finalize (GstV4l2Src * v4l2src);
 
@@ -116,7 +132,7 @@ static gboolean gst_v4l2src_decide_allocation (GstBaseSrc * src,
     GstQuery * query);
 static GstFlowReturn gst_v4l2src_create (GstPushSrc * src, GstBuffer ** out);
 static GstCaps *gst_v4l2src_fixate (GstBaseSrc * basesrc, GstCaps * caps,
-    GstStructure * pref_s);
+    struct PreferredCapsInfo *pref);
 static gboolean gst_v4l2src_negotiate (GstBaseSrc * basesrc);
 
 static void gst_v4l2src_set_property (GObject * object, guint prop_id,
@@ -145,6 +161,81 @@ gst_v4l2src_class_init (GstV4l2SrcClass * klass)
 
   gst_v4l2_object_install_properties_helper (gobject_class,
       DEFAULT_PROP_DEVICE);
+
+  /**
+   * GstV4l2Src:crop-top:
+   *
+   * Number of pixels to crop from the top edge of captured video
+   * stream
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (gobject_class, PROP_CROP_TOP,
+      g_param_spec_uint ("crop-top", "Crop top",
+          "Pixels to crop at top of video capture input",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstV4l2Src:crop-left:
+   *
+   * Number of pixels to crop from the left edge of captured video
+   * stream
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (gobject_class, PROP_CROP_LEFT,
+      g_param_spec_uint ("crop-left", "Crop left",
+          "Pixels to crop at left of video capture input",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstV4l2Src:crop-bottom:
+   *
+   * Number of pixels to crop from the bottom edge of captured video
+   * stream
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (gobject_class, PROP_CROP_BOTTOM,
+      g_param_spec_uint ("crop-bottom", "Crop bottom",
+          "Pixels to crop at bottom of video capture input",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstV4l2Src:crop-right:
+   *
+   * Number of pixels to crop from the right edge of captured video
+   * stream
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (gobject_class, PROP_CROP_RIGHT,
+      g_param_spec_uint ("crop-right", "Crop right",
+          "Pixels to crop at right of video capture input",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstV4l2Src:crop-bounds:
+   *
+   * Crop bounding region.  All crop regions must lie within this region.
+   * The bounds are represented as a four element array, that descibes the
+   * [x, y, width, height] of the area.
+   *
+   * The size and position of the crop
+   * bounds will only be known, once the v4l2 device is opened and the
+   * input source selected. Applications can connect to the
+   * "notify::crop-bounds" signal to be notified when the bounding region is
+   * updated, and set an appropriate crop region.
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (gobject_class, PROP_CROP_BOUNDS,
+      gst_param_spec_array ("crop-bounds", "Crop bounds",
+          "The bounding region for crop rectangles ('<x, y, width, height>').",
+          g_param_spec_int ("rect-value", "Rectangle Value",
+              "One of x, y, width or height value.", G_MININT, G_MAXINT, -1,
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS),
+          G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
   /**
    * GstV4l2Src::prepare-format:
@@ -225,11 +316,46 @@ gst_v4l2src_set_property (GObject * object,
   if (!gst_v4l2_object_set_property_helper (v4l2src->v4l2object,
           prop_id, value, pspec)) {
     switch (prop_id) {
+      case PROP_CROP_TOP:
+        v4l2src->crop_top = g_value_get_uint (value);
+        break;
+      case PROP_CROP_LEFT:
+        v4l2src->crop_left = g_value_get_uint (value);
+        break;
+      case PROP_CROP_BOTTOM:
+        v4l2src->crop_bottom = g_value_get_uint (value);
+        break;
+      case PROP_CROP_RIGHT:
+        v4l2src->crop_right = g_value_get_uint (value);
+        break;
       default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
         break;
     }
   }
+}
+
+static void
+gst_v4l2src_set_rect_value (GValue * value, struct v4l2_rect *rect)
+{
+  GValue val = { 0 };
+
+  g_value_init (&val, G_TYPE_INT);
+  g_value_reset (value);
+
+  g_value_set_int (&val, rect->left);
+  gst_value_array_append_value (value, &val);
+
+  g_value_set_int (&val, rect->top);
+  gst_value_array_append_value (value, &val);
+
+  g_value_set_int (&val, rect->width);
+  gst_value_array_append_value (value, &val);
+
+  g_value_set_int (&val, rect->height);
+  gst_value_array_append_value (value, &val);
+
+  g_value_unset (&val);
 }
 
 static void
@@ -241,20 +367,27 @@ gst_v4l2src_get_property (GObject * object,
   if (!gst_v4l2_object_get_property_helper (v4l2src->v4l2object,
           prop_id, value, pspec)) {
     switch (prop_id) {
+      case PROP_CROP_TOP:
+        g_value_set_uint (value, v4l2src->crop_top);
+        break;
+      case PROP_CROP_LEFT:
+        g_value_set_uint (value, v4l2src->crop_left);
+        break;
+      case PROP_CROP_BOTTOM:
+        g_value_set_uint (value, v4l2src->crop_bottom);
+        break;
+      case PROP_CROP_RIGHT:
+        g_value_set_uint (value, v4l2src->crop_right);
+        break;
+      case PROP_CROP_BOUNDS:
+        gst_v4l2src_set_rect_value (value, &v4l2src->crop_bounds);
+        break;
       default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
         break;
     }
   }
 }
-
-struct PreferedCapsInfo
-{
-  gint width;
-  gint height;
-  gint fps_n;
-  gint fps_d;
-};
 
 static gboolean
 gst_vl42_src_fixate_fields (GQuark field_id, GValue * value, gpointer user_data)
@@ -274,7 +407,7 @@ gst_vl42_src_fixate_fields (GQuark field_id, GValue * value, gpointer user_data)
 
 static void
 gst_v4l2_src_fixate_struct_with_preference (GstStructure * s,
-    struct PreferedCapsInfo *pref)
+    struct PreferredCapsInfo *pref)
 {
   if (gst_structure_has_field (s, "width"))
     gst_structure_fixate_field_nearest_int (s, "width", pref->width);
@@ -308,7 +441,7 @@ gst_v4l2_src_parse_fixed_struct (GstStructure * s,
 /* TODO Consider framerate */
 static gint
 gst_v4l2src_fixed_caps_compare (GstCaps * caps_a, GstCaps * caps_b,
-    struct PreferedCapsInfo *pref)
+    struct PreferredCapsInfo *pref)
 {
   GstStructure *a, *b;
   gint aw = G_MAXINT, ah = G_MAXINT, ad = G_MAXINT;
@@ -371,6 +504,23 @@ done:
 }
 
 static gboolean
+gst_v4l2src_do_source_crop (GstV4l2Src * v4l2src)
+{
+  struct v4l2_rect def_crop;
+
+  if (v4l2src->apply_crop_settings)
+    return gst_v4l2_object_set_crop (v4l2src->v4l2object, &v4l2src->crop_rect);
+
+  /* If no crop setting is given, reset to the default. Resetting the default
+   * crop may fail if the device does not support cropping. This  should not
+   * be considered an error. */
+  if (gst_v4l2_object_get_crop_default (v4l2src->v4l2object, &def_crop))
+    gst_v4l2_object_set_crop (v4l2src->v4l2object, &def_crop);
+
+  return TRUE;
+}
+
+static gboolean
 gst_v4l2src_set_format (GstV4l2Src * v4l2src, GstCaps * caps,
     GstV4l2Error * error)
 {
@@ -385,16 +535,16 @@ gst_v4l2src_set_format (GstV4l2Src * v4l2src, GstCaps * caps,
   g_signal_emit (v4l2src, gst_v4l2_signals[SIGNAL_PRE_SET_FORMAT], 0,
       v4l2src->v4l2object->video_fd, caps);
 
+  if (!gst_v4l2src_do_source_crop (v4l2src))
+    return FALSE;
+
   return gst_v4l2_object_set_format (obj, caps, error);
 }
 
 static GstCaps *
-gst_v4l2src_fixate (GstBaseSrc * basesrc, GstCaps * caps, GstStructure * pref_s)
+gst_v4l2src_fixate (GstBaseSrc * basesrc, GstCaps * caps,
+    struct PreferredCapsInfo *pref)
 {
-  /* Let's prefer a good resolutiion as of today's standard. */
-  struct PreferedCapsInfo pref = {
-    3840, 2160, 120, 1
-  };
   GstV4l2Src *v4l2src = GST_V4L2SRC (basesrc);
   GstV4l2Object *obj = v4l2src->v4l2object;
   GList *caps_list = NULL;
@@ -403,20 +553,8 @@ gst_v4l2src_fixate (GstBaseSrc * basesrc, GstCaps * caps, GstStructure * pref_s)
   GstV4l2Error error = GST_V4L2_ERROR_INIT;
   GstCaps *fcaps = NULL;
 
-  GST_DEBUG_OBJECT (basesrc, "fixating caps %" GST_PTR_FORMAT, caps);
-
-  /* We consider the first structure from peercaps to be a preference. This is
-   * useful for matching a reported native display, or simply to avoid
-   * transformation to happen downstream. */
-  if (pref_s) {
-    pref_s = gst_structure_copy (pref_s);
-    gst_v4l2_src_fixate_struct_with_preference (pref_s, &pref);
-    gst_v4l2_src_parse_fixed_struct (pref_s, &pref.width, &pref.height,
-        &pref.fps_n, &pref.fps_d);
-    gst_structure_free (pref_s);
-  }
-
-  GST_DEBUG_OBJECT (basesrc, "Preferred size %ix%i", pref.width, pref.height);
+  GST_DEBUG_OBJECT (basesrc, "Fixating caps %" GST_PTR_FORMAT, caps);
+  GST_DEBUG_OBJECT (basesrc, "Preferred size %ix%i", pref->width, pref->height);
 
   /* Sort the structures to get the caps that is nearest to our preferences,
    * first. Use single struct caps for sorting so we preserve the features.  */
@@ -424,10 +562,10 @@ gst_v4l2src_fixate (GstBaseSrc * basesrc, GstCaps * caps, GstStructure * pref_s)
     GstCaps *tmp = gst_caps_copy_nth (caps, i);
 
     s = gst_caps_get_structure (tmp, 0);
-    gst_v4l2_src_fixate_struct_with_preference (s, &pref);
+    gst_v4l2_src_fixate_struct_with_preference (s, pref);
 
     caps_list = g_list_insert_sorted_with_data (caps_list, tmp,
-        (GCompareDataFunc) gst_v4l2src_fixed_caps_compare, &pref);
+        (GCompareDataFunc) gst_v4l2src_fixed_caps_compare, pref);
   }
 
   gst_caps_unref (caps);
@@ -503,12 +641,167 @@ gst_v4l2src_fixate (GstBaseSrc * basesrc, GstCaps * caps, GstStructure * pref_s)
 }
 
 static gboolean
+gst_v4l2src_query_preferred_dv_timings (GstV4l2Src * v4l2src,
+    struct PreferredCapsInfo *pref)
+{
+  GstV4l2Object *obj = v4l2src->v4l2object;
+  struct v4l2_dv_timings dv_timings = { 0, };
+  const struct v4l2_bt_timings *bt = &dv_timings.bt;
+  gboolean not_streaming;
+  gint tot_width, tot_height;
+  gint gcd;
+
+  if (!gst_v4l2_query_dv_timings (obj, &dv_timings))
+    return FALSE;
+
+  pref->width = bt->width;
+  pref->height = bt->height;
+
+  tot_height = bt->height +
+      bt->vfrontporch + bt->vsync + bt->vbackporch +
+      bt->il_vfrontporch + bt->il_vsync + bt->il_vbackporch;
+  tot_width = bt->width + bt->hfrontporch + bt->hsync + bt->hbackporch;
+
+  pref->fps_n = bt->pixelclock;
+  pref->fps_d = tot_width * tot_height;
+
+  if (bt->interlaced)
+    pref->fps_d /= 2;
+
+  gcd = gst_util_greatest_common_divisor (pref->fps_n, pref->fps_d);
+  pref->fps_n /= gcd;
+  pref->fps_d /= gcd;
+
+  /* If are are not streaming (e.g. we received source-change event), lock the
+   * new timing immediatly so that TRY_FMT can properly work */
+  {
+    GstBufferPool *obj_pool = gst_v4l2_object_get_buffer_pool (obj);
+    not_streaming = !obj_pool || !GST_V4L2_BUFFER_POOL_IS_STREAMING (obj_pool);
+    if (obj_pool)
+      gst_object_unref (obj_pool);
+  }
+
+  if (not_streaming) {
+    gst_v4l2_set_dv_timings (obj, &dv_timings);
+    /* Setting a new DV timings invalidates the probed caps. */
+    gst_caps_replace (&obj->probed_caps, NULL);
+  }
+
+  GST_INFO_OBJECT (v4l2src, "Using DV Timings: %i x %i (%i/%i fps)",
+      pref->width, pref->height, pref->fps_n, pref->fps_d);
+
+  return TRUE;
+}
+
+static gboolean
+gst_v4l2src_query_preferred_size (GstV4l2Src * v4l2src,
+    struct PreferredCapsInfo *pref)
+{
+  struct v4l2_input in = { 0, };
+
+  if (!gst_v4l2_get_input (v4l2src->v4l2object, &in.index))
+    return FALSE;
+
+  if (!gst_v4l2_query_input (v4l2src->v4l2object, &in))
+    return FALSE;
+
+  GST_INFO_OBJECT (v4l2src, "Detect input %u as `%s`", in.index, in.name);
+
+  /* Notify signal status using WARNING/INFO messages */
+  if (in.status & (V4L2_IN_ST_NO_POWER | V4L2_IN_ST_NO_SIGNAL)) {
+    if (!v4l2src->no_signal)
+      /* note: taken from decklinksrc element */
+      GST_ELEMENT_WARNING (v4l2src, RESOURCE, READ, ("Signal lost"),
+          ("No input source was detected - video frames invalid"));
+    v4l2src->no_signal = TRUE;
+  } else if (v4l2src->no_signal) {
+    if (v4l2src->no_signal)
+      GST_ELEMENT_INFO (v4l2src, RESOURCE, READ,
+          ("Signal recovered"), ("Input source detected"));
+    v4l2src->no_signal = FALSE;
+  }
+
+  if (in.capabilities & V4L2_IN_CAP_NATIVE_SIZE) {
+    GST_FIXME_OBJECT (v4l2src, "missing support for native video size");
+    return FALSE;
+  } else if (in.capabilities & V4L2_IN_CAP_DV_TIMINGS) {
+    return gst_v4l2src_query_preferred_dv_timings (v4l2src, pref);
+  } else if (in.capabilities & V4L2_IN_CAP_STD) {
+    GST_FIXME_OBJECT (v4l2src, "missing support for video standards");
+    return FALSE;
+  }
+
+  return FALSE;
+}
+
+static gboolean
+gst_v4l2src_setup_source_crop (GstV4l2Src * v4l2src,
+    struct PreferredCapsInfo *pref)
+{
+  gint cropped_width, cropped_height;
+  struct v4l2_rect *crop_bounds = &v4l2src->crop_bounds;
+
+  v4l2src->apply_crop_settings = FALSE;
+
+  if (!gst_v4l2_object_get_crop_bounds (v4l2src->v4l2object, crop_bounds))
+    return FALSE;
+
+  g_object_notify (G_OBJECT (v4l2src), "crop-bounds");
+
+  cropped_width = crop_bounds->width - v4l2src->crop_left - v4l2src->crop_right;
+  cropped_height =
+      crop_bounds->height - v4l2src->crop_top - v4l2src->crop_bottom;
+
+  if (v4l2src->crop_left < crop_bounds->left
+      || v4l2src->crop_top < crop_bounds->top
+      || cropped_width <= 0 || cropped_height <= 0) {
+    GST_WARNING_OBJECT (v4l2src, "Ignoring out of bounds crop region");
+    return FALSE;
+  }
+
+  if (cropped_width == crop_bounds->width
+      && cropped_height == crop_bounds->height) {
+    GST_DEBUG_OBJECT (v4l2src,
+        "No cropping requested, keep current preferred size");
+    return FALSE;
+  }
+
+  v4l2src->crop_rect.left = v4l2src->crop_left;
+  v4l2src->crop_rect.top = v4l2src->crop_top;
+  v4l2src->crop_rect.width = cropped_width;
+  v4l2src->crop_rect.height = cropped_height;
+  v4l2src->apply_crop_settings = TRUE;
+
+  pref->width = cropped_width;
+  pref->height = cropped_height;
+
+  GST_INFO_OBJECT (v4l2src, "Updated preferred capture size to %i x %i",
+      pref->width, pref->height);
+
+  return TRUE;
+}
+
+static gboolean
 gst_v4l2src_negotiate (GstBaseSrc * basesrc)
 {
+  GstV4l2Src *v4l2src = GST_V4L2SRC (basesrc);
   GstCaps *thiscaps;
   GstCaps *caps = NULL;
   GstCaps *peercaps = NULL;
   gboolean result = FALSE;
+  /* Let's prefer a good resolution as of today's standard. */
+  struct PreferredCapsInfo pref = {
+    3840, 2160, 120, 1
+  };
+  gboolean have_pref;
+
+  /* For drivers that has DV timings or other default size query
+   * capabilities, we will prefer that resolution. This must happen before we
+   * probe the caps, as locking DV Timings or standards will change result of
+   * the caps enumeration. */
+  have_pref = gst_v4l2src_query_preferred_size (v4l2src, &pref);
+
+  have_pref |= gst_v4l2src_setup_source_crop (v4l2src, &pref);
 
   /* first see what is possible on our source pad */
   thiscaps = gst_pad_query_caps (GST_BASE_SRC_PAD (basesrc), NULL);
@@ -537,12 +830,20 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
   if (caps) {
     /* now fixate */
     if (!gst_caps_is_empty (caps)) {
-      GstStructure *pref = NULL;
 
-      if (peercaps && !gst_caps_is_any (peercaps))
-        pref = gst_caps_get_structure (peercaps, 0);
+      /* otherwise consider the first structure from peercaps to be a
+       * preference. This is useful for matching a reported native display,
+       * or simply to avoid transformation to happen downstream. */
+      if (!have_pref && peercaps && !gst_caps_is_any (peercaps)) {
+        GstStructure *pref_s = gst_caps_get_structure (peercaps, 0);
+        pref_s = gst_structure_copy (pref_s);
+        gst_v4l2_src_fixate_struct_with_preference (pref_s, &pref);
+        gst_v4l2_src_parse_fixed_struct (pref_s, &pref.width, &pref.height,
+            &pref.fps_n, &pref.fps_d);
+        gst_structure_free (pref_s);
+      }
 
-      caps = gst_v4l2src_fixate (basesrc, caps, pref);
+      caps = gst_v4l2src_fixate (basesrc, caps, &pref);
 
       /* Fixating may fail as we now set the selected format */
       if (!caps) {
@@ -550,7 +851,7 @@ gst_v4l2src_negotiate (GstBaseSrc * basesrc)
         goto done;
       }
 
-      GST_DEBUG_OBJECT (basesrc, "fixated to: %" GST_PTR_FORMAT, caps);
+      GST_INFO_OBJECT (basesrc, "fixated to: %" GST_PTR_FORMAT, caps);
 
       if (gst_caps_is_any (caps)) {
         /* hmm, still anything, so element can do anything and
@@ -572,7 +873,7 @@ done:
 
 no_nego_needed:
   {
-    GST_DEBUG_OBJECT (basesrc, "no negotiation needed");
+    GST_INFO_OBJECT (basesrc, "no negotiation needed");
     if (thiscaps)
       gst_caps_unref (thiscaps);
     return TRUE;
@@ -599,19 +900,31 @@ static gboolean
 gst_v4l2src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
 {
   GstV4l2Src *src = GST_V4L2SRC (bsrc);
+  GstBufferPool *bpool = gst_v4l2_object_get_buffer_pool (src->v4l2object);
   gboolean ret = TRUE;
 
   if (src->pending_set_fmt) {
     GstCaps *caps = gst_pad_get_current_caps (GST_BASE_SRC_PAD (bsrc));
     GstV4l2Error error = GST_V4L2_ERROR_INIT;
 
+    /* Setting the format replaces the current pool */
+    gst_clear_object (&bpool);
+
     caps = gst_caps_make_writable (caps);
-    if (!(ret = gst_v4l2src_set_format (src, caps, &error)))
+
+    ret = gst_v4l2src_set_format (src, caps, &error);
+    if (ret) {
+      GstV4l2BufferPool *pool;
+      bpool = gst_v4l2_object_get_buffer_pool (src->v4l2object);
+      pool = GST_V4L2_BUFFER_POOL (bpool);
+      gst_v4l2_buffer_pool_enable_resolution_change (pool);
+    } else {
       gst_v4l2_error (src, &error);
+    }
 
     gst_caps_unref (caps);
     src->pending_set_fmt = FALSE;
-  } else if (gst_buffer_pool_is_active (src->v4l2object->pool)) {
+  } else if (gst_buffer_pool_is_active (bpool)) {
     /* Trick basesrc into not deactivating the active pool. Renegotiating here
      * would otherwise turn off and on the camera. */
     GstAllocator *allocator;
@@ -637,6 +950,8 @@ gst_v4l2src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
       gst_object_unref (pool);
     if (allocator)
       gst_object_unref (allocator);
+    if (bpool)
+      gst_object_unref (bpool);
 
     return GST_BASE_SRC_CLASS (parent_class)->decide_allocation (bsrc, query);
   }
@@ -648,10 +963,12 @@ gst_v4l2src_decide_allocation (GstBaseSrc * bsrc, GstQuery * query)
   }
 
   if (ret) {
-    if (!gst_buffer_pool_set_active (src->v4l2object->pool, TRUE))
+    if (!gst_buffer_pool_set_active (bpool, TRUE))
       goto activate_failed;
   }
 
+  if (bpool)
+    gst_object_unref (bpool);
   return ret;
 
 activate_failed:
@@ -659,6 +976,8 @@ activate_failed:
     GST_ELEMENT_ERROR (src, RESOURCE, SETTINGS,
         (_("Failed to allocate required memory.")),
         ("Buffer pool activation failed"));
+    if (bpool)
+      gst_object_unref (bpool);
     return FALSE;
   }
 }
@@ -703,8 +1022,13 @@ gst_v4l2src_query (GstBaseSrc * bsrc, GstQuery * query)
         min_latency /= 2;
 
       /* max latency is total duration of the frame buffer */
-      if (obj->pool != NULL)
-        num_buffers = GST_V4L2_BUFFER_POOL_CAST (obj->pool)->max_latency;
+      {
+        GstBufferPool *obj_pool = gst_v4l2_object_get_buffer_pool (obj);
+        if (obj_pool != NULL) {
+          num_buffers = GST_V4L2_BUFFER_POOL_CAST (obj_pool)->max_latency;
+          gst_object_unref (obj_pool);
+        }
+      }
 
       if (num_buffers == 0)
         max_latency = -1;
@@ -824,12 +1148,28 @@ gst_v4l2src_change_state (GstElement * element, GstStateChange transition)
   return ret;
 }
 
+static gboolean
+gst_v4l2src_handle_resolution_change (GstV4l2Src * v4l2src)
+{
+  GST_INFO_OBJECT (v4l2src, "Resolution change detected.");
+
+  /* It is required to always cycle through streamoff, we also need to
+   * streamoff in order to allow locking a new DV_TIMING which will
+   * influence the output of TRY_FMT */
+  gst_v4l2src_stop (GST_BASE_SRC (v4l2src));
+
+  /* Force renegotiation */
+  v4l2src->renegotiation_adjust = v4l2src->offset + 1;
+  v4l2src->pending_set_fmt = TRUE;
+
+  return gst_base_src_negotiate (GST_BASE_SRC (v4l2src));
+}
+
 static GstFlowReturn
 gst_v4l2src_create (GstPushSrc * src, GstBuffer ** buf)
 {
   GstV4l2Src *v4l2src = GST_V4L2SRC (src);
   GstV4l2Object *obj = v4l2src->v4l2object;
-  GstV4l2BufferPool *pool = GST_V4L2_BUFFER_POOL_CAST (obj->pool);
   GstFlowReturn ret;
   GstClock *clock;
   GstClockTime abs_time, base_time, timestamp, duration;
@@ -841,12 +1181,35 @@ gst_v4l2src_create (GstPushSrc * src, GstBuffer ** buf)
     ret = GST_BASE_SRC_CLASS (parent_class)->alloc (GST_BASE_SRC (src), 0,
         obj->info.size, buf);
 
-    if (G_UNLIKELY (ret != GST_FLOW_OK))
+    if (G_UNLIKELY (ret != GST_FLOW_OK)) {
+      if (ret == GST_V4L2_FLOW_RESOLUTION_CHANGE) {
+        if (!gst_v4l2src_handle_resolution_change (v4l2src)) {
+          ret = GST_FLOW_NOT_NEGOTIATED;
+          goto error;
+        }
+
+        continue;
+      }
       goto alloc_failed;
+    }
 
-    ret = gst_v4l2_buffer_pool_process (pool, buf);
+    {
+      GstV4l2BufferPool *obj_pool =
+          GST_V4L2_BUFFER_POOL_CAST (gst_v4l2_object_get_buffer_pool (obj));
+      ret = gst_v4l2_buffer_pool_process (obj_pool, buf, NULL);
+      if (obj_pool)
+        gst_object_unref (obj_pool);
 
-  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER);
+      if (G_UNLIKELY (ret == GST_V4L2_FLOW_RESOLUTION_CHANGE)) {
+        if (!gst_v4l2src_handle_resolution_change (v4l2src)) {
+          ret = GST_FLOW_NOT_NEGOTIATED;
+          goto error;
+        }
+      }
+    }
+
+  } while (ret == GST_V4L2_FLOW_CORRUPTED_BUFFER ||
+      ret == GST_V4L2_FLOW_RESOLUTION_CHANGE);
 
   if (G_UNLIKELY (ret != GST_FLOW_OK))
     goto error;

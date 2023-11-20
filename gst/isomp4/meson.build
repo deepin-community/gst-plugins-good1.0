@@ -1,5 +1,6 @@
 mp4_sources = [
   'isomp4-plugin.c',
+  'gstisomp4element.c',
   'gstrtpxqtdepay.c',
   'qtdemux.c',
   'qtdemux_types.c',
@@ -7,6 +8,7 @@ mp4_sources = [
   'qtdemux_lang.c',
   'qtdemux_tags.c',
   'qtdemux_tree.c',
+  'qtdemux-webvtt.c',
   'gstisoff.c',
   'gstqtmux.c',
   'gstqtmoovrecover.c',
@@ -27,7 +29,10 @@ gstisomp4 = library('gstisomp4',
   install : true,
   install_dir : plugins_install_dir,
 )
-pkgconfig.generate(gstisomp4, install_dir : plugins_pkgconfig_install_dir)
 plugins += [gstisomp4]
 
 install_data(sources: 'GstQTMux.prs', install_dir: presetdir)
+
+env = environment()
+env.prepend('GST_PRESET_PATH', meson.current_source_dir())
+meson.add_devenv(env)

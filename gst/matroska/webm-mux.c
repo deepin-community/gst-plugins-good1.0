@@ -42,6 +42,7 @@
 #include "config.h"
 #endif
 
+#include "gstmatroskaelements.h"
 #include "webm-mux.h"
 
 #define COMMON_VIDEO_CAPS \
@@ -54,6 +55,8 @@
   "rate = (int) [ 1, MAX ]"
 
 G_DEFINE_TYPE (GstWebMMux, gst_webm_mux, GST_TYPE_MATROSKA_MUX);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (webmmux, "webmmux",
+    GST_RANK_PRIMARY, GST_TYPE_WEBM_MUX, matroska_element_init (plugin));
 
 static GstStaticPadTemplate webm_src_templ = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
@@ -66,7 +69,9 @@ static GstStaticPadTemplate webm_videosink_templ =
     GST_PAD_SINK,
     GST_PAD_REQUEST,
     GST_STATIC_CAPS ("video/x-vp8, " COMMON_VIDEO_CAPS ";"
-        "video/x-vp9, " COMMON_VIDEO_CAPS ";" "video/x-av1, " COMMON_VIDEO_CAPS)
+        "video/x-vp9, " COMMON_VIDEO_CAPS ";" "video/x-av1, "
+        "stream-format = (string) \"obu-stream\", "
+        "alignment = (string) \"tu\", " COMMON_VIDEO_CAPS)
     );
 
 static GstStaticPadTemplate webm_audiosink_templ =

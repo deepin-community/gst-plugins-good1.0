@@ -51,7 +51,7 @@ typedef struct {
  */
 typedef struct {
   gboolean is_valid;
-  guint32 ssrc; /* who the report is from */
+  guint32 ssrc; /* which source is the report about */
   guint8  fractionlost;
   guint32 packetslost;
   guint32 exthighestseq;
@@ -70,6 +70,7 @@ typedef struct {
  * @address: address of the sender of the packet
  * @current_time: current time according to the system clock
  * @running_time: time of a packet as buffer running_time
+ * @arrival_time: time of arrival of a packet
  * @ntpnstime: time of a packet NTP time in nanoseconds
  * @header_len: number of overhead bytes per packet
  * @bytes: bytes of the packet including lowlevel overhead
@@ -78,9 +79,13 @@ typedef struct {
  * @pt: the payload type of the packet
  * @rtptime: the RTP time of the packet
  * @marker: the marker bit
- *
- * @tw_seqnum_ext_id: the extension-header ID for transport-wide seqnums
- * @tw_seqnum: the transport-wide seqnum of the packet
+ * @csrc_count: Number of CSRCs in @csrcs
+ * @csrcs: CSRCs
+ * @header_ext: Header extension data
+ * @header_ext_bit_pattern: Header extension bit pattern
+ * @ntp64_ext_id: Extension header ID for RFC6051 64-bit NTP timestamp.
+ * @have_ntp64_ext: If there is at least one 64-bit NTP timestamp header
+ *     extension.
  *
  * Structure holding information about the packet.
  */
@@ -92,6 +97,7 @@ typedef struct {
   GSocketAddress *address;
   GstClockTime  current_time;
   GstClockTime  running_time;
+  GstClockTime  arrival_time;
   guint64       ntpnstime;
   guint         header_len;
   guint         bytes;
@@ -106,6 +112,8 @@ typedef struct {
   guint32       csrcs[16];
   GBytes        *header_ext;
   guint16       header_ext_bit_pattern;
+  guint8        ntp64_ext_id;
+  gboolean      have_ntp64_ext;
 } RTPPacketInfo;
 
 /**

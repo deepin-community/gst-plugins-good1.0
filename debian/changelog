@@ -1,3 +1,166 @@
+gst-plugins-good1.0 (1.22.6-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream bugfix release
+  * Drop Qt patch: applied in new release
+  * Build-Depend on qttools5-dev
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Mon, 25 Sep 2023 15:04:32 -0400
+
+gst-plugins-good1.0 (1.22.5-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Cherry-pick patch to fix Qt build
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 16 Aug 2023 08:02:48 -0400
+
+gst-plugins-good1.0 (1.22.4-1) unstable; urgency=high
+
+  * Team upload
+  * SECURITY UPDATE: New upstream release
+    - Integer overflow leading to heap overwrite in FLAC image tag handling
+      (GStreamer-SA-2023-0001, ZDI-CAN-20775)
+    - Heap overwrite in PGS subtitle overlay decoder
+      (GStreamer-SA-2023-0003, ZDI-CAN-20994)
+  * debian/control: Update qt6 Build-Depends
+  * debian/control: Update libshout-dev Build-Depends
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 28 Jun 2023 15:58:32 -0400
+
+gst-plugins-good1.0 (1.22.3-2) unstable; urgency=medium
+
+  * Team upload
+  * Release to unstable
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Mon, 12 Jun 2023 14:42:30 -0400
+
+gst-plugins-good1.0 (1.22.3-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * debian/rules: Enable all hardening flags
+  * Try dropping patch that skips some failing build tests
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Sun, 21 May 2023 08:14:46 -0400
+
+gst-plugins-good1.0 (1.22.1-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream bugfix release
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 03 Apr 2023 16:35:02 -0400
+
+gst-plugins-good1.0 (1.22.0-5) unstable; urgency=medium
+
+  * Team upload
+  * Disable the qt5/qt6 elements on architectures where Qt5/Qt6 are not
+    building
+
+ -- Laurent Bigonville <bigon@debian.org>  Mon, 27 Feb 2023 20:01:19 +0100
+
+gst-plugins-good1.0 (1.22.0-4) unstable; urgency=medium
+
+  * Add Breaks/Replaces against gst-plugins-ugly which used to provide
+    libgstxingmux.so (Closes: #1029923)
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sun, 29 Jan 2023 10:44:36 -0500
+
+gst-plugins-good1.0 (1.22.0-3) unstable; urgency=medium
+
+  * Build-Depend on libgirepository1.0-dev
+  * Release to unstable
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sat, 28 Jan 2023 14:00:56 -0500
+
+gst-plugins-good1.0 (1.22.0-2) experimental; urgency=medium
+
+  * Team upload
+  * debian/control: Bump minimum gstreamer, glib, and meson
+  * debian/rules: Fix configure flags for non-Linux
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Fri, 27 Jan 2023 13:33:24 -0500
+
+gst-plugins-good1.0 (1.22.0-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Build-Depend on libxml2-dev
+  * debian/control: Bump minimum gstreamer, glib, and meson
+  * debian/gstreamer1.0-plugins-good.install: Add new plugins
+  * Add Qt6 plugin package
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Tue, 24 Jan 2023 19:26:03 -0500
+
+gst-plugins-good1.0 (1.20.5-2) unstable; urgency=medium
+
+  * Fix alternate dependency on libsoup3 (Closes: #1023215)
+  * debian/rules: Set -Dauto_features=enabled
+  * Update standards version to 4.6.2, no changes needed
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Tue, 24 Jan 2023 18:58:12 -0500
+
+gst-plugins-good1.0 (1.20.5-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Add debian/upstream/signing-key.asc and update debian/watch to use it
+  * Update debian/upstream/metadata
+  * Update standards version to 4.6.1, no changes needed
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 05 Jan 2023 14:03:18 -0500
+
+gst-plugins-good1.0 (1.20.3-1) unstable; urgency=medium
+
+  [ Sebastian Dröge ]
+  * New upstream bugfix release.
+
+  [ Debian Janitor ]
+  * Add missing ${misc:Depends} to Depends for gstreamer1.0-pulseaudio.
+  * Move transitional package gstreamer1.0-pulseaudio to oldlibs/optional per
+    policy 4.0.1.
+  * Update standards version to 4.6.0, no changes needed.
+  * Remove field Section on binary package gstreamer1.0-plugins-good that
+    duplicates source.
+
+  [ Jeremy Bicha ]
+  * Don't ignore dh_auto_test failures on amd64 & arm64.
+  * Add a patch to skip 2 test failures.
+
+ -- Sebastian Dröge <slomo@debian.org>  Thu, 16 Jun 2022 09:36:08 +0300
+
+gst-plugins-good1.0 (1.20.2-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+
+ -- Sebastian Dröge <slomo@debian.org>  Tue, 03 May 2022 10:04:35 +0300
+
+gst-plugins-good1.0 (1.20.1-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+
+ -- Sebastian Dröge <slomo@debian.org>  Mon, 14 Mar 2022 16:53:45 +0200
+
+gst-plugins-good1.0 (1.20.0-2) unstable; urgency=medium
+
+  * debian/control:
+    + Let gstreamer1.0-plugins-good depend on >= 1.20.0 of
+      gstreamer1.0-plugins-base as it requires plugins from there.
+
+ -- Sebastian Dröge <slomo@debian.org>  Fri, 04 Feb 2022 10:29:26 +0200
+
+gst-plugins-good1.0 (1.20.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Sebastian Dröge <slomo@debian.org>  Fri, 04 Feb 2022 08:56:54 +0200
+
+gst-plugins-good1.0 (1.19.90-1) experimental; urgency=medium
+
+  * New upstream release candidate.
+
+ -- Sebastian Dröge <slomo@debian.org>  Fri, 28 Jan 2022 17:06:48 +0200
+
 gst-plugins-good1.0 (1.18.5-2) unstable; urgency=medium
 
   [ Adrian Bunk ]

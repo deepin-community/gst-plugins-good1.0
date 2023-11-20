@@ -61,8 +61,8 @@ GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("image/png, "
-        "width = (int) [ 16, 1000000 ], "
-        "height = (int) [ 16, 1000000 ], " "framerate = " GST_VIDEO_FPS_RANGE)
+        "width = (int) [ 1, 1000000 ], "
+        "height = (int) [ 1, 1000000 ], " "framerate = " GST_VIDEO_FPS_RANGE)
     );
 
 static GstStaticPadTemplate pngenc_sink_template =
@@ -74,6 +74,8 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 
 #define parent_class gst_pngenc_parent_class
 G_DEFINE_TYPE (GstPngEnc, gst_pngenc, GST_TYPE_VIDEO_ENCODER);
+GST_ELEMENT_REGISTER_DEFINE (pngenc, "pngenc", GST_RANK_PRIMARY,
+    GST_TYPE_PNGENC);
 
 static void gst_pngenc_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec);

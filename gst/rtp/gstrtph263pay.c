@@ -29,6 +29,7 @@
 #include <gst/rtp/gstrtpbuffer.h>
 #include <gst/video/video.h>
 
+#include "gstrtpelements.h"
 #include "gstrtph263pay.h"
 #include "gstrtputils.h"
 
@@ -399,6 +400,8 @@ static void gst_rtp_h263_pay_package_destroy (GstRtpH263PayPackage * pack);
 
 #define gst_rtp_h263_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpH263Pay, gst_rtp_h263_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtph263pay, "rtph263pay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_H263_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_h263_pay_class_init (GstRtpH263PayClass * klass)
@@ -1308,8 +1311,10 @@ gst_rtp_h263_pay_push (GstRtpH263Pay * rtph263pay,
   GST_BUFFER_PTS (package->outbuf) = rtph263pay->first_ts;
 
   gst_rtp_buffer_set_marker (&rtp, package->marker);
-  if (package->marker)
+  if (package->marker) {
+    GST_BUFFER_FLAG_SET (package->outbuf, GST_BUFFER_FLAG_MARKER);
     GST_DEBUG_OBJECT (rtph263pay, "Marker set!");
+  }
 
   gst_rtp_buffer_unmap (&rtp);
 
@@ -1355,7 +1360,9 @@ gst_rtp_h263_pay_A_fragment_push (GstRtpH263Pay * rtph263pay,
 
   pack->gobn = context->gobs[first]->gobn;
   pack->mode = GST_RTP_H263_PAYLOAD_HEADER_MODE_A;
-  pack->outbuf = gst_rtp_buffer_new_allocate (pack->mode, 0, 0);
+  pack->outbuf =
+      gst_rtp_base_payload_allocate_output_buffer (GST_RTP_BASE_PAYLOAD
+      (rtph263pay), pack->mode, 0, 0);
 
   GST_DEBUG_OBJECT (rtph263pay, "Sending len:%d data to push function",
       pack->payload_len);
@@ -1412,7 +1419,9 @@ gst_rtp_h263_pay_B_fragment_push (GstRtpH263Pay * rtph263pay,
   }
 
   pack->payload_len = pack->payload_end - pack->payload_start + 1;
-  pack->outbuf = gst_rtp_buffer_new_allocate (pack->mode, 0, 0);
+  pack->outbuf =
+      gst_rtp_base_payload_allocate_output_buffer (GST_RTP_BASE_PAYLOAD
+      (rtph263pay), pack->mode, 0, 0);
 
   return gst_rtp_h263_pay_push (rtph263pay, context, pack);
 }
@@ -1637,7 +1646,8 @@ gst_rtp_h263_send_entire_frame (GstRtpH263Pay * rtph263pay,
       rtph263pay->available_data);
 
   pack->outbuf =
-      gst_rtp_buffer_new_allocate (GST_RTP_H263_PAYLOAD_HEADER_MODE_A, 0, 0);
+      gst_rtp_base_payload_allocate_output_buffer (GST_RTP_BASE_PAYLOAD
+      (rtph263pay), GST_RTP_H263_PAYLOAD_HEADER_MODE_A, 0, 0);
 
   return gst_rtp_h263_pay_push (rtph263pay, context, pack);
 }
@@ -1859,11 +1869,4 @@ gst_rtp_h263_pay_handle_buffer (GstRTPBasePayload * payload, GstBuffer * buffer)
       "-------------------- END FRAME ---------------");
 
   return ret;
-}
-
-gboolean
-gst_rtp_h263_pay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtph263pay",
-      GST_RANK_SECONDARY, GST_TYPE_RTP_H263_PAY);
 }

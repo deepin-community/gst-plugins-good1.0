@@ -1,6 +1,7 @@
 pixbuf_sources = [
   'gstgdkpixbufdec.c',
   'gstgdkpixbufoverlay.c',
+  'gstgdkpixbufelement.c',
   'gstgdkpixbufplugin.c',
   'gstgdkpixbufsink.c',
 ]
@@ -17,6 +18,5 @@ if gdkpixbuf_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstgdkpixbuf, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstgdkpixbuf]
 endif

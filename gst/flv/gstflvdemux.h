@@ -64,6 +64,11 @@ struct _GstFlvDemux
   gboolean have_group_id;
   guint group_id;
 
+  gchar *upstream_stream_id;
+  GstStream *audio_stream;
+  GstStream *video_stream;
+  gboolean streams_aware;
+
   /* <private> */
   
   GstIndex *index;
@@ -145,6 +150,7 @@ struct _GstFlvDemux
   gint64 file_size;
   GstEvent *seek_event;
   gint64 seek_time;
+  guint32 segment_seqnum;
 
   GstClockTime index_max_time;
   gint64 index_max_pos;
