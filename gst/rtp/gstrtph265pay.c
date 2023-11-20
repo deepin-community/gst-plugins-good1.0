@@ -32,6 +32,7 @@
 /* Included to not duplicate gst_rtp_h265_add_vps_sps_pps () */
 #include "gstrtph265depay.h"
 
+#include "gstrtpelements.h"
 #include "gstrtph265pay.h"
 #include "gstrtputils.h"
 #include "gstbuffermemory.h"
@@ -166,6 +167,8 @@ static void gst_rtp_h265_pay_reset_bundle (GstRtpH265Pay * rtph265pay);
 
 #define gst_rtp_h265_pay_parent_class parent_class
 G_DEFINE_TYPE (GstRtpH265Pay, gst_rtp_h265_pay, GST_TYPE_RTP_BASE_PAYLOAD);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtph265pay, "rtph265pay",
+    GST_RANK_SECONDARY, GST_TYPE_RTP_H265_PAY, rtp_element_init (plugin));
 
 static void
 gst_rtp_h265_pay_class_init (GstRtpH265PayClass * klass)
@@ -919,21 +922,24 @@ gst_rtp_h265_pay_decode_nal (GstRtpH265Pay * payloader,
 }
 
 static GstFlowReturn gst_rtp_h265_pay_payload_nal (GstRTPBasePayload *
-    basepayload, GPtrArray * paybufs, GstClockTime dts, GstClockTime pts);
+    basepayload, GPtrArray * paybufs, GstClockTime dts, GstClockTime pts,
+    gboolean delta_unit);
 static GstFlowReturn gst_rtp_h265_pay_payload_nal_single (GstRTPBasePayload *
     basepayload, GstBuffer * paybuf, GstClockTime dts, GstClockTime pts,
-    gboolean marker);
+    gboolean marker, gboolean delta_unit);
 static GstFlowReturn gst_rtp_h265_pay_payload_nal_fragment (GstRTPBasePayload *
     basepayload, GstBuffer * paybuf, GstClockTime dts, GstClockTime pts,
-    gboolean marker, guint mtu, guint8 nal_type, const guint8 * nal_header,
-    int size);
+    gboolean marker, gboolean delta_unit, guint mtu, guint8 nal_type,
+    const guint8 * nal_header, int size);
 static GstFlowReturn gst_rtp_h265_pay_payload_nal_bundle (GstRTPBasePayload *
     basepayload, GstBuffer * paybuf, GstClockTime dts, GstClockTime pts,
-    gboolean marker, guint8 nal_type, const guint8 * nal_header, int size);
+    gboolean marker, gboolean delta_unit, guint8 nal_type,
+    const guint8 * nal_header, int size);
 
 static GstFlowReturn
 gst_rtp_h265_pay_send_vps_sps_pps (GstRTPBasePayload * basepayload,
-    GstRtpH265Pay * rtph265pay, GstClockTime dts, GstClockTime pts)
+    GstRtpH265Pay * rtph265pay, GstClockTime dts, GstClockTime pts,
+    gboolean delta_unit)
 {
   GstFlowReturn ret = GST_FLOW_OK;
   gboolean sent_all_vps_sps_pps = TRUE;
@@ -964,7 +970,7 @@ gst_rtp_h265_pay_send_vps_sps_pps (GstRTPBasePayload * basepayload,
     g_ptr_array_add (bufs, gst_buffer_ref (pps_buf));
   }
 
-  ret = gst_rtp_h265_pay_payload_nal (basepayload, bufs, dts, pts);
+  ret = gst_rtp_h265_pay_payload_nal (basepayload, bufs, dts, pts, FALSE);
   if (ret != GST_FLOW_OK) {
     /* not critical but warn */
     GST_WARNING_OBJECT (basepayload, "failed pushing VPS/SPS/PPS");
@@ -990,7 +996,8 @@ gst_rtp_h265_pay_reset_bundle (GstRtpH265Pay * rtph265pay)
 
 static GstFlowReturn
 gst_rtp_h265_pay_payload_nal (GstRTPBasePayload * basepayload,
-    GPtrArray * paybufs, GstClockTime dts, GstClockTime pts)
+    GPtrArray * paybufs, GstClockTime dts, GstClockTime pts,
+    gboolean delta_unit)
 {
   GstRtpH265Pay *rtph265pay;
   guint mtu;
@@ -1100,7 +1107,8 @@ gst_rtp_h265_pay_payload_nal (GstRTPBasePayload * basepayload,
       sent_ps = TRUE;
       GST_DEBUG_OBJECT (rtph265pay, "sending VPS/SPS/PPS before current frame");
       ret =
-          gst_rtp_h265_pay_send_vps_sps_pps (basepayload, rtph265pay, dts, pts);
+          gst_rtp_h265_pay_send_vps_sps_pps (basepayload, rtph265pay, dts, pts,
+          delta_unit);
       if (ret != GST_FLOW_OK) {
         gst_buffer_unref (paybuf);
         continue;
@@ -1109,10 +1117,10 @@ gst_rtp_h265_pay_payload_nal (GstRTPBasePayload * basepayload,
 
     if (rtph265pay->aggregate_mode != GST_RTP_H265_AGGREGATE_NONE)
       ret = gst_rtp_h265_pay_payload_nal_bundle (basepayload, paybuf, dts, pts,
-          marker, nal_type, nal_header, size);
+          marker, delta_unit, nal_type, nal_header, size);
     else
       ret = gst_rtp_h265_pay_payload_nal_fragment (basepayload, paybuf, dts,
-          pts, marker, mtu, nal_type, nal_header, size);
+          pts, marker, delta_unit, mtu, nal_type, nal_header, size);
   }
 
   g_ptr_array_free (paybufs, TRUE);
@@ -1122,7 +1130,8 @@ gst_rtp_h265_pay_payload_nal (GstRTPBasePayload * basepayload,
 
 static GstFlowReturn
 gst_rtp_h265_pay_payload_nal_single (GstRTPBasePayload * basepayload,
-    GstBuffer * paybuf, GstClockTime dts, GstClockTime pts, gboolean marker)
+    GstBuffer * paybuf, GstClockTime dts, GstClockTime pts, gboolean marker,
+    gboolean delta_unit)
 {
   GstBufferList *outlist;
   GstBuffer *outbuf;
@@ -1131,12 +1140,16 @@ gst_rtp_h265_pay_payload_nal_single (GstRTPBasePayload * basepayload,
   /* use buffer lists
    * create buffer without payload containing only the RTP header
    * (memory block at index 0) */
-  outbuf = gst_rtp_buffer_new_allocate (0, 0, 0);
+  outbuf = gst_rtp_base_payload_allocate_output_buffer (basepayload, 0, 0, 0);
 
   gst_rtp_buffer_map (outbuf, GST_MAP_WRITE, &rtp);
 
   /* Mark the end of a frame */
   gst_rtp_buffer_set_marker (&rtp, marker);
+  GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
+
+  if (delta_unit)
+    GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_DELTA_UNIT);
 
   /* timestamp the outbuffer */
   GST_BUFFER_PTS (outbuf) = pts;
@@ -1160,6 +1173,7 @@ gst_rtp_h265_pay_payload_nal_single (GstRTPBasePayload * basepayload,
 static GstFlowReturn
 gst_rtp_h265_pay_payload_nal_fragment (GstRTPBasePayload * basepayload,
     GstBuffer * paybuf, GstClockTime dts, GstClockTime pts, gboolean marker,
+    gboolean delta_unit,
     guint mtu, guint8 nal_type, const guint8 * nal_header, int size)
 {
   GstRtpH265Pay *rtph265pay = (GstRtpH265Pay *) basepayload;
@@ -1175,7 +1189,7 @@ gst_rtp_h265_pay_payload_nal_fragment (GstRTPBasePayload * basepayload,
         "NAL Unit fit in one packet datasize=%d mtu=%d", size, mtu);
     /* will fit in one packet */
     return gst_rtp_h265_pay_payload_nal_single (basepayload, paybuf, dts, pts,
-        marker);
+        marker, delta_unit);
   }
 
   GST_DEBUG_OBJECT (basepayload,
@@ -1206,7 +1220,7 @@ gst_rtp_h265_pay_payload_nal_fragment (GstRTPBasePayload * basepayload,
     /* use buffer lists
      * create buffer without payload containing only the RTP header
      * (memory block at index 0), and with space for PayloadHdr and FU header */
-    outbuf = gst_rtp_buffer_new_allocate (3, 0, 0);
+    outbuf = gst_rtp_base_payload_allocate_output_buffer (basepayload, 3, 0, 0);
 
     gst_rtp_buffer_map (outbuf, GST_MAP_WRITE, &rtp);
 
@@ -1221,6 +1235,8 @@ gst_rtp_h265_pay_payload_nal_fragment (GstRTPBasePayload * basepayload,
     /* If it's the last fragment and the end of this au, mark the end of
      * slice */
     gst_rtp_buffer_set_marker (&rtp, last_fragment && marker);
+    if (last_fragment && marker)
+      GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_MARKER);
 
     /* FU Header */
     payload[2] = (first_fragment << 7) | (last_fragment << 6) |
@@ -1232,6 +1248,12 @@ gst_rtp_h265_pay_payload_nal_fragment (GstRTPBasePayload * basepayload,
     gst_rtp_copy_video_meta (rtph265pay, outbuf, paybuf);
     gst_buffer_copy_into (outbuf, paybuf, GST_BUFFER_COPY_MEMORY, pos,
         fragment_size);
+    if (!delta_unit)
+      /* only the first packet sent should not have the flag */
+      delta_unit = TRUE;
+    else
+      GST_BUFFER_FLAG_SET (outbuf, GST_BUFFER_FLAG_DELTA_UNIT);
+
     /* add the buffer to the buffer list */
     gst_buffer_list_add (outlist, outbuf);
   }
@@ -1250,6 +1272,7 @@ gst_rtp_h265_pay_send_bundle (GstRtpH265Pay * rtph265pay, gboolean marker)
   guint length, bundle_size;
   GstBuffer *first, *outbuf;
   GstClockTime dts, pts;
+  gboolean delta_unit;
 
   bundle_size = rtph265pay->bundle_size;
 
@@ -1265,6 +1288,7 @@ gst_rtp_h265_pay_send_bundle (GstRtpH265Pay * rtph265pay, gboolean marker)
   first = gst_buffer_list_get (bundle, 0);
   dts = GST_BUFFER_DTS (first);
   pts = GST_BUFFER_PTS (first);
+  delta_unit = GST_BUFFER_FLAG_IS_SET (first, GST_BUFFER_FLAG_DELTA_UNIT);
 
   if (length == 1) {
     /* Push unaggregated NALU */
@@ -1324,13 +1348,14 @@ gst_rtp_h265_pay_send_bundle (GstRtpH265Pay * rtph265pay, gboolean marker)
 
   gst_rtp_h265_pay_reset_bundle (rtph265pay);
   return gst_rtp_h265_pay_payload_nal_single (basepayload, outbuf, dts, pts,
-      marker);
+      marker, delta_unit);
 }
 
 static gboolean
 gst_rtp_h265_pay_payload_nal_bundle (GstRTPBasePayload * basepayload,
     GstBuffer * paybuf, GstClockTime dts, GstClockTime pts,
-    gboolean marker, guint8 nal_type, const guint8 * nal_header, int size)
+    gboolean marker, gboolean delta_unit, guint8 nal_type,
+    const guint8 * nal_header, int size)
 {
   GstRtpH265Pay *rtph265pay;
   GstFlowReturn ret;
@@ -1380,7 +1405,7 @@ gst_rtp_h265_pay_payload_nal_bundle (GstRTPBasePayload * basepayload,
       goto out;
 
     return gst_rtp_h265_pay_payload_nal_fragment (basepayload, paybuf, dts, pts,
-        marker, mtu, nal_type, nal_header, size);
+        marker, delta_unit, mtu, nal_type, nal_header, size);
   }
 
   bundle_size = rtph265pay->bundle_size + pay_size;
@@ -1411,6 +1436,11 @@ gst_rtp_h265_pay_payload_nal_bundle (GstRTPBasePayload * basepayload,
   paybuf = gst_buffer_make_writable (paybuf);
   GST_BUFFER_PTS (paybuf) = pts;
   GST_BUFFER_DTS (paybuf) = dts;
+
+  if (delta_unit)
+    GST_BUFFER_FLAG_SET (paybuf, GST_BUFFER_FLAG_DELTA_UNIT);
+  else
+    GST_BUFFER_FLAG_UNSET (paybuf, GST_BUFFER_FLAG_DELTA_UNIT);
 
   gst_buffer_list_add (bundle, gst_buffer_ref (paybuf));
   rtph265pay->bundle_size += pay_size;
@@ -1446,6 +1476,7 @@ gst_rtp_h265_pay_handle_buffer (GstRTPBasePayload * basepayload,
   gboolean hevc;
   GstBuffer *paybuf = NULL;
   gsize skip;
+  gboolean delayed_not_delta_unit = FALSE;
   gboolean marker = FALSE;
   gboolean discont = FALSE;
   gboolean draining = (buffer == NULL);
@@ -1463,8 +1494,14 @@ gst_rtp_h265_pay_handle_buffer (GstRTPBasePayload * basepayload,
       return GST_FLOW_OK;
   } else {
     if (buffer) {
-      if (gst_adapter_available (rtph265pay->adapter) == 0)
-        discont = GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_DISCONT);
+      if (!GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_DELTA_UNIT)) {
+        if (gst_adapter_available (rtph265pay->adapter) == 0)
+          rtph265pay->delta_unit = FALSE;
+        else
+          delayed_not_delta_unit = TRUE;
+      }
+
+      discont = GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_DISCONT);
       marker = GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MARKER);
       gst_adapter_push (rtph265pay->adapter, buffer);
       buffer = NULL;
@@ -1500,6 +1537,8 @@ gst_rtp_h265_pay_handle_buffer (GstRTPBasePayload * basepayload,
 
     pts = GST_BUFFER_PTS (buffer);
     dts = GST_BUFFER_DTS (buffer);
+    rtph265pay->delta_unit = GST_BUFFER_FLAG_IS_SET (buffer,
+        GST_BUFFER_FLAG_DELTA_UNIT);
     marker = GST_BUFFER_FLAG_IS_SET (buffer, GST_BUFFER_FLAG_MARKER);
     GST_DEBUG_OBJECT (basepayload, "got %" G_GSIZE_FORMAT " bytes",
         remaining_buffer_size);
@@ -1553,7 +1592,13 @@ gst_rtp_h265_pay_handle_buffer (GstRTPBasePayload * basepayload,
       offset += nal_len;
       remaining_buffer_size -= nal_len;
     }
-    ret = gst_rtp_h265_pay_payload_nal (basepayload, paybufs, dts, pts);
+    ret =
+        gst_rtp_h265_pay_payload_nal (basepayload, paybufs, dts, pts,
+        rtph265pay->delta_unit);
+
+    if (!rtph265pay->delta_unit)
+      /* only the first outgoing packet doesn't have the DELTA_UNIT flag */
+      rtph265pay->delta_unit = TRUE;
 
     gst_buffer_memory_unmap (&memory);
     gst_buffer_unref (buffer);
@@ -1668,12 +1713,22 @@ gst_rtp_h265_pay_handle_buffer (GstRTPBasePayload * basepayload,
         discont = FALSE;
       }
 
+      if (delayed_not_delta_unit) {
+        rtph265pay->delta_unit = FALSE;
+        delayed_not_delta_unit = FALSE;
+      } else {
+        /* only the first outgoing packet doesn't have the DELTA_UNIT flag */
+        rtph265pay->delta_unit = TRUE;
+      }
+
       /* move to next NAL packet */
       /* Skips the trailing zeros */
       gst_adapter_flush (rtph265pay->adapter, nal_len - size);
     }
     /* put the data in one or more RTP packets */
-    ret = gst_rtp_h265_pay_payload_nal (basepayload, paybufs, dts, pts);
+    ret =
+        gst_rtp_h265_pay_payload_nal (basepayload, paybufs, dts, pts,
+        rtph265pay->delta_unit);
     g_array_set_size (nal_queue, 0);
   }
 
@@ -1820,11 +1875,4 @@ gst_rtp_h265_pay_get_property (GObject * object, guint prop_id,
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
-}
-
-gboolean
-gst_rtp_h265_pay_plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "rtph265pay",
-      GST_RANK_SECONDARY, GST_TYPE_RTP_H265_PAY);
 }

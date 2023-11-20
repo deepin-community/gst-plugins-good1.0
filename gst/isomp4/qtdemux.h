@@ -55,6 +55,8 @@ typedef struct _QtDemuxSegment QtDemuxSegment;
 typedef struct _QtDemuxRandomAccessEntry QtDemuxRandomAccessEntry;
 typedef struct _QtDemuxStreamStsdEntry QtDemuxStreamStsdEntry;
 
+typedef GstBuffer * (*QtDemuxProcessFunc)(GstQTDemux * qtdemux, QtDemuxStream * stream, GstBuffer * buf);
+
 enum QtDemuxState
 {
   QTDEMUX_STATE_INITIAL,        /* Initial state (haven't got the header yet) */
@@ -62,6 +64,19 @@ enum QtDemuxState
   QTDEMUX_STATE_MOVIE,          /* Parsing/Playing the media data */
   QTDEMUX_STATE_BUFFER_MDAT     /* Buffering the mdat atom */
 };
+
+typedef enum {
+  /* Regular behaviour */
+  VARIANT_NONE,
+
+  /* We're working with a MediaSource Extensions ISO BMFF Bytestream. */
+  VARIANT_MSE_BYTESTREAM,
+
+  /* We're working with a smoothstreaming fragment.
+   * Mss doesn't have 'moov' or any information about the streams format,
+   * requiring qtdemux to expose and create the streams */
+  VARIANT_MSS_FRAGMENTED,
+} Variant;
 
 struct _GstQTDemux {
   GstElement element;
@@ -87,6 +102,7 @@ struct _GstQTDemux {
   gint     n_video_streams;
   gint     n_audio_streams;
   gint     n_sub_streams;
+  gint     n_meta_streams;
 
   GstFlowCombiner *flowcombiner;
 
@@ -116,6 +132,10 @@ struct _GstQTDemux {
   /* Global duration (in global timescale). Use QTTIME macros to get GstClockTime */
   guint64 duration;
 
+  /* Start UTC time as extracted from the AFIdentification box, reset on every
+   * moov */
+  GstClockTime start_utc_time;
+
   /* Total size of header atoms. Used to calculate fallback overall bitrate */
   guint header_size;
 
@@ -135,10 +155,7 @@ struct _GstQTDemux {
 
   guint32 segment_seqnum;
 
-  /* flag to indicate that we're working with a smoothstreaming fragment
-   * Mss doesn't have 'moov' or any information about the streams format,
-   * requiring qtdemux to expose and create the streams */
-  gboolean mss_mode;
+  Variant variant;
 
   /* Set to TRUE if the incoming stream is either a MSS stream or
    * a Fragmented MP4 (containing the [mvex] atom in the header) */
@@ -391,8 +408,10 @@ struct _QtDemuxStream
    * data */
   gboolean need_clip;
 
-  /* buffer needs some custom processing, e.g. subtitles */
-  gboolean need_process;
+  /* If the buffer needs some custom processing, e.g. subtitles, pass them
+   * through this function */
+  QtDemuxProcessFunc process_func;
+
   /* buffer needs potentially be split, e.g. CEA608 subtitles */
   gboolean need_split;
 
@@ -473,8 +492,16 @@ struct _QtDemuxStream
   guint32 ctts_count;
   gint32 ctts_soffset;
 
-  /* cslg */
-  guint32 cslg_shift;
+  /* cslg composition_to_dts_shift or based on the smallest negative
+   * composition time offset.
+   *
+   * This is unsigned because only negative composition time offsets /
+   * positive composition_to_dts_shift matter here. In all other cases,
+   * DTS/PTS can be inferred directly without ending up with PTS>DTS.
+   *
+   * See 14496-12 6.4
+   */
+  guint64 cslg_shift;
 
   /* fragmented */
   gboolean parsed_trex;
