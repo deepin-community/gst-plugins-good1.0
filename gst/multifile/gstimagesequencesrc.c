@@ -338,7 +338,7 @@ gst_image_sequence_src_class_init (GstImageSequenceSrcClass * klass)
   gst_element_class_set_static_metadata (gstelement_class,
       "Image Sequence Source", "Source/File/Video",
       "Create a video stream from a sequence of image files",
-      "Cesar Fabian Orccon Chipana <cfoch.fabian@gmail.com>\n"
+      "Cesar Fabian Orccon Chipana <cfoch.fabian@gmail.com>, "
       "Thibault Saunier <tsaunier@igalia.com>");
 }
 
@@ -489,24 +489,25 @@ static gint
 gst_image_sequence_src_count_frames (GstImageSequenceSrc * self,
     gboolean can_read)
 {
+  gchar *previous_filename = NULL;
   if (can_read && self->stop_index < 0 && self->path) {
     gint i;
 
     for (i = self->start_index;; i++) {
       gchar *filename = g_strdup_printf (self->path, i);
-
-      if (!g_file_test (filename, G_FILE_TEST_IS_REGULAR)) {
+      if (!g_file_test (filename, G_FILE_TEST_IS_REGULAR)
+          || !g_strcmp0 (previous_filename, filename)) {
         i--;
         g_free (filename);
         break;
       }
-
-      g_free (filename);
+      g_free (previous_filename);
+      previous_filename = filename;
     }
     if (i > self->start_index)
       self->stop_index = i;
   }
-
+  g_free (previous_filename);
   if (self->stop_index >= self->start_index)
     self->n_frames = self->stop_index - self->start_index + 1;
   return self->n_frames;

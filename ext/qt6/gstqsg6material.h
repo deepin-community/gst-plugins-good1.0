@@ -1,6 +1,6 @@
 /*
  * GStreamer
- * Copyright (C) 2015 Matthew Waters <matthew@centricular.com>
+ * Copyright (C) 2023 Matthew Waters <matthew@centricular.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,44 +18,58 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_QSG_TEXTURE_H__
-#define __GST_QSG_TEXTURE_H__
+#ifndef __GST_QSG6_MATERIAL_H__
+#define __GST_QSG6_MATERIAL_H__
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <gst/gl/gl.h>
 
-#include "gstqtgl.h"
-#include <QtQuick/QSGTexture>
+#include "gstqt6gl.h"
+#include <QtQuick/QSGMaterial>
+#include <QtQuick/QSGMaterialShader>
 #include <QtGui/QOpenGLFunctions>
+#include <QtQuick/QSGTexture>
 
-class GstQSGTexture : public QSGTexture, protected QOpenGLFunctions
+class QRhi;
+class QRhiResourceUpdateBatch;
+class GstQSGMaterialShader;
+
+class GstQSGMaterial : public QSGMaterial
 {
-    Q_OBJECT
+protected:
+    GstQSGMaterial();
+    ~GstQSGMaterial();
 public:
-    GstQSGTexture ();
-    ~GstQSGTexture ();
+    static GstQSGMaterial *new_for_format (GstVideoFormat format);
 
     void setCaps (GstCaps * caps);
     gboolean setBuffer (GstBuffer * buffer);
-    GstBuffer * getBuffer (gboolean * was_bound);
+    GstBuffer * getBuffer (bool * was_bound);
+    bool compatibleWith(GstVideoInfo *v_info);
 
-    /* QSGTexture */
-    void bind ();
-    int textureId () const;
-    QSize textureSize () const;
-    bool hasAlphaChannel () const;
-    bool hasMipmaps () const;
+    void setFiltering(QSGTexture::Filtering);
+
+    QSGTexture * bind(GstQSGMaterialShader *, QRhi *, QRhiResourceUpdateBatch *, guint binding, GstVideoFormat);
+
+    /* QSGMaterial */
+    QSGMaterialShader *createShader(QSGRendererInterface::RenderMode renderMode) const override;
+
+    struct {
+        int input_swizzle[4];
+        QMatrix4x4 color_matrix;
+        bool dirty;
+    } uniforms;
 
 private:
     GstBuffer * buffer_;
-    gboolean buffer_was_bound;
-    GstBuffer * sync_buffer_;
+    bool buffer_was_bound;
     GWeakRef qt_context_ref_;
+    GstBuffer * sync_buffer_;
     GstMemory * mem_;
-    GLuint dummy_tex_id_;
     GstVideoInfo v_info;
     GstVideoFrame v_frame;
+    QSGTexture::Filtering m_filtering;
 };
 
-#endif /* __GST_QSG_TEXTURE_H__ */
+#endif /* __GST_QSG6_MATERIAL_H__ */
