@@ -49,7 +49,7 @@ struct DownloadHelper
 
   gchar *referer;
   gchar *user_agent;
-  gchar **cookies;
+  GSList *cookies;
 };
 
 struct DownloadHelperTransfer
@@ -99,7 +99,7 @@ transfer_completion_cb (gpointer src_object, GAsyncResult * res,
   DownloadRequest *request = transfer->request;
 
   if (transfer->blocking)
-    return;                     /* Somehow a completion got signalled for a blocking request */
+    return;
 
   download_request_lock (request);
   request->in_use = FALSE;
@@ -201,7 +201,8 @@ finish_transfer_task (DownloadHelper * dh, GTask * transfer_task,
 
       if (transfer->blocking)
         g_cond_broadcast (&transfer->cond);
-      else if (error != NULL)
+
+      if (error != NULL)
         g_task_return_error (transfer_task, error);
       else
         g_task_return_boolean (transfer_task, TRUE);
@@ -267,7 +268,7 @@ on_read_ready (GObject * source, GAsyncResult * result, gpointer user_data)
 
     if (!g_cancellable_is_cancelled (transfer->cancellable)) {
       GST_ERROR ("Failed to read stream: %s", error->message);
-      if (request->state != DOWNLOAD_REQUEST_STATE_UNSENT)
+      if (request->state != DOWNLOAD_REQUEST_STATE_CANCELLED)
         request->state = DOWNLOAD_REQUEST_STATE_ERROR;
       finish_transfer_task (dh, transfer_task, error);
     } else {
@@ -309,19 +310,19 @@ on_read_ready (GObject * source, GAsyncResult * result, gpointer user_data)
       }
     }
 
-    if (request->download_start_time == GST_CLOCK_TIME_NONE) {
-      GST_LOG ("Got first data for URI %s", request->uri);
-      request->download_start_time = now;
-    }
-
     if (gst_buffer != NULL) {
-      /* Unsent means cancellation is in progress, so don't override
-       * the state. Otherwise make sure it is LOADING */
-      if (request->state != DOWNLOAD_REQUEST_STATE_UNSENT)
+      /* Don't override CANCELLED state. Otherwise make sure it is LOADING */
+      if (request->state != DOWNLOAD_REQUEST_STATE_CANCELLED)
         request->state = DOWNLOAD_REQUEST_STATE_LOADING;
 
-      GST_LOG ("Adding %u bytes to buffer",
-          (guint) (gst_buffer_get_size (gst_buffer)));
+      if (request->download_start_time == GST_CLOCK_TIME_NONE) {
+        GST_LOG ("Got first data for URI %s", request->uri);
+        request->download_start_time = now;
+      }
+      request->download_newest_data_time = now;
+
+      GST_LOG ("Adding %u bytes to buffer (request URI %s)",
+          (guint) (gst_buffer_get_size (gst_buffer)), request->uri);
 
       download_request_add_buffer (request, gst_buffer);
 
@@ -348,17 +349,20 @@ on_read_ready (GObject * source, GAsyncResult * result, gpointer user_data)
 finish_transfer:
   if (request->in_use && !g_cancellable_is_cancelled (transfer->cancellable)) {
     SoupStatus status_code = _soup_message_get_status (transfer->msg);
+#ifndef GST_DISABLE_GST_DEBUG
+    guint download_ms = (now - request->download_request_time) / GST_MSECOND;
+    GST_LOG ("request complete in %u ms. Code %d URI %s range %" G_GINT64_FORMAT
+        " %" G_GINT64_FORMAT, download_ms, status_code,
+        request->uri, request->range_start, request->range_end);
+#endif
 
-    GST_LOG ("request complete. Code %d URI %s range %" G_GINT64_FORMAT " %"
-        G_GINT64_FORMAT, status_code, request->uri,
-        request->range_start, request->range_end);
-
-    if (request->state != DOWNLOAD_REQUEST_STATE_UNSENT) {
+    if (request->state != DOWNLOAD_REQUEST_STATE_CANCELLED) {
       if (SOUP_STATUS_IS_SUCCESSFUL (status_code)
-          || SOUP_STATUS_IS_REDIRECTION (status_code))
+          || SOUP_STATUS_IS_REDIRECTION (status_code)) {
         request->state = DOWNLOAD_REQUEST_STATE_COMPLETE;
-      else
+      } else {
         request->state = DOWNLOAD_REQUEST_STATE_ERROR;
+      }
     }
   }
   request->download_end_time = now;
@@ -528,7 +532,7 @@ on_request_sent (GObject * source, GAsyncResult * result, gpointer user_data)
           G_GINT64_FORMAT, request->status_code, request->uri,
           request->range_start, request->range_end);
 
-      if (request->state != DOWNLOAD_REQUEST_STATE_UNSENT)
+      if (request->state != DOWNLOAD_REQUEST_STATE_CANCELLED)
         request->state = DOWNLOAD_REQUEST_STATE_ERROR;
       finish_transfer_task (dh, transfer_task, error);
     } else {
@@ -543,8 +547,8 @@ on_request_sent (GObject * source, GAsyncResult * result, gpointer user_data)
     return;
   }
 
-  /* If the state went back to UNSENT, we were cancelled so don't override it */
-  if (request->state != DOWNLOAD_REQUEST_STATE_UNSENT &&
+  /* If the state is cancelled don't override it */
+  if (request->state != DOWNLOAD_REQUEST_STATE_CANCELLED &&
       request->state != DOWNLOAD_REQUEST_STATE_HEADERS_RECEIVED) {
 
     request->state = DOWNLOAD_REQUEST_STATE_HEADERS_RECEIVED;
@@ -585,7 +589,9 @@ finish_transfer_error:
     GST_LOG ("request complete. Code %d URI %s range %" G_GINT64_FORMAT " %"
         G_GINT64_FORMAT, _soup_message_get_status (msg), request->uri,
         request->range_start, request->range_end);
-    if (request->state != DOWNLOAD_REQUEST_STATE_UNSENT)
+
+    /* If the state is cancelled don't override it */
+    if (request->state != DOWNLOAD_REQUEST_STATE_CANCELLED)
       request->state = DOWNLOAD_REQUEST_STATE_ERROR;
   }
 
@@ -648,7 +654,7 @@ downloadhelper_free (DownloadHelper * dh)
 
   g_free (dh->referer);
   g_free (dh->user_agent);
-  g_strfreev (dh->cookies);
+  _soup_cookies_free (dh->cookies);
 
   g_free (dh);
 }
@@ -675,10 +681,25 @@ downloadhelper_set_user_agent (DownloadHelper * dh, const gchar * user_agent)
 void
 downloadhelper_set_cookies (DownloadHelper * dh, gchar ** cookies)
 {
+  guint i;
   g_mutex_lock (&dh->transfer_lock);
-  g_strfreev (dh->cookies);
-  dh->cookies = cookies;
+  _soup_cookies_free (dh->cookies);
+  dh->cookies = NULL;
+
+  for (i = 0; cookies[i]; i++) {
+    SoupCookie *cookie = _soup_cookie_parse (cookies[i]);
+
+    if (cookie == NULL) {
+      GST_WARNING ("Couldn't parse cookie, ignoring: %s", cookies[i]);
+      continue;
+    }
+
+    dh->cookies = g_slist_append (dh->cookies, cookie);
+  }
+
   g_mutex_unlock (&dh->transfer_lock);
+
+  g_strfreev (cookies);
 }
 
 /* Called with the transfer lock held */
@@ -689,6 +710,13 @@ submit_transfer (DownloadHelper * dh, GTask * transfer_task)
   DownloadRequest *request = transfer->request;
 
   download_request_lock (request);
+  if (request->state == DOWNLOAD_REQUEST_STATE_CANCELLED) {
+    download_request_unlock (request);
+
+    GST_DEBUG ("Don't submit already cancelled transfer");
+    return;
+  }
+
   request->state = DOWNLOAD_REQUEST_STATE_OPEN;
   request->download_request_time =
       gst_adaptive_demux_clock_get_time (dh->clock);
@@ -799,15 +827,14 @@ downloadhelper_stop (DownloadHelper * dh)
     DownloadRequest *request = transfer->request;
 
     download_request_lock (request);
-    /* Reset the state to UNSENT, to indicate cancellation, like an XMLHttpRequest does */
-    request->state = DOWNLOAD_REQUEST_STATE_UNSENT;
+    request->state = DOWNLOAD_REQUEST_STATE_CANCELLED;
     download_request_unlock (request);
 
     transfer->complete = TRUE;
     if (transfer->blocking)
       g_cond_broadcast (&transfer->cond);
-    else
-      g_task_return_boolean (transfer_task, TRUE);
+
+    g_task_return_boolean (transfer_task, TRUE);
   }
 
   g_array_set_size (dh->active_transfers, 0);
@@ -890,11 +917,7 @@ downloadhelper_submit_request (DownloadHelper * dh,
   }
 
   if (dh->cookies != NULL) {
-    gchar **cookie;
-
-    for (cookie = dh->cookies; *cookie != NULL; cookie++) {
-      _soup_message_headers_append (msg_headers, "Cookie", *cookie);
-    }
+    _soup_cookies_to_request (dh->cookies, msg);
   }
 
   transfer_task = transfer_task_new (dh, request, msg, blocking);
@@ -966,8 +989,7 @@ downloadhelper_cancel_request (DownloadHelper * dh, DownloadRequest * request)
   GST_DEBUG ("Cancelling request for URI %s range %" G_GINT64_FORMAT " %"
       G_GINT64_FORMAT, request->uri, request->range_start, request->range_end);
 
-  request->state = DOWNLOAD_REQUEST_STATE_UNSENT;
-
+  request->state = DOWNLOAD_REQUEST_STATE_CANCELLED;
   for (i = dh->active_transfers->len - 1; i >= 0; i--) {
     GTask *transfer_task = g_array_index (dh->active_transfers, GTask *, i);
     DownloadHelperTransfer *transfer = g_task_get_task_data (transfer_task);
