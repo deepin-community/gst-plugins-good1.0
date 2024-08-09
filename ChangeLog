@@ -1,3 +1,536 @@
+=== release 1.24.6 ===
+
+2024-07-29 16:41:37 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-good.doap:
+	* meson.build:
+	  Release 1.24.6
+
+2024-06-01 15:15:18 +0300  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/osxaudio/gstosxaudiodeviceprovider.c:
+	  macos: Listen for audio devices being added/removed
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7258>
+
+2024-06-12 23:25:52 +1000  Matthew Waters <matthew@centricular.com>
+
+	* ext/qt/gstqsgmaterial.cc:
+	  qml/glsink: also support GLES2 needing shader 'precision' directives
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3616
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7125>
+
+2024-07-23 15:32:22 +0200  Loïc Yhuel <loic.yhuel@softathome.com>
+
+	* meson.build:
+	  meson: fix SIZEOF_OFF_T when cross-compiling with Meson >= 1.3.0
+	  https://mesonbuild.com/Release-notes-for-1-3-0.html#clarify-of-implicitlyincluded-headers-in-clike-compiler-checks
+	  With only stddef.h, off_t is not defined, so when cross-compiling SIZEOF_OFF_T is -1.
+	  We now use sys/types.h which should define off_t.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7218>
+
+2024-07-01 10:00:42 +0800  Shengqi Yu <shengqi.yu@mediatek.com>
+
+	* sys/v4l2/gstv4l2object.c:
+	  v4l2object: use v4l2 reported width for padded_width when complex video formats
+	  Stride means bytes per line, and padded_width means pixels. Here,
+	  padded_width shoule be pix width reported by v4l2 instead of stride.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7122>
+
+2024-06-02 11:40:04 +0300  Jan Schmidt <jan@centricular.com>
+
+	* ext/adaptivedemux2/hls/m3u8.c:
+	  adaptivedemux: Fix handling closed caption streams
+	  Fix a typo "CLOSED_CAPTION" -> "CLOSED-CAPTION" and
+	  a broken if statement that always bailed out for
+	  closed captions
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7105>
+
+2024-06-20 13:02:19 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.5
+
+=== release 1.24.5 ===
+
+2024-06-20 12:54:15 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-good.doap:
+	* meson.build:
+	  Release 1.24.5
+
+2024-06-19 02:10:29 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* gst/dtmf/gstrtpdtmfsrc.c:
+	  rtpdtmfsrc: minor logging clean-up
+	  Only serialise event structure for debug logging purposes
+	  if logging is actually enabled.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7062>
+
+2024-06-19 01:55:57 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* gst/dtmf/gstrtpdtmfsrc.c:
+	* tests/check/elements/dtmf.c:
+	  rtpdtmfsrc: fix leak when shutting down mid-event
+	  .. and update rtpdtmfdepay unit test to trigger
+	  the potential leak more reliably (without the fix).
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3633
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7062>
+
+2024-06-14 16:50:12 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* tests/check/elements/dtmf.c:
+	  rtpdtmfdepay: add unit test for caps fixation issue with downstream audioconvert
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7048>
+
+2024-06-14 16:20:31 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* docs/gst_plugins_cache.json:
+	* gst/dtmf/gstrtpdtmfdepay.c:
+	* tests/check/elements/dtmf.c:
+	  rtpdtmfdepay: fix caps negotiation with audioconvert
+	  Specify "layout" field in src template to make sure it's
+	  set and gets fixated properly if the downstream element
+	  supports both interleaved and non-interleaved caps.
+	  Fixes
+	  gst_pad_set_caps: assertion 'caps != NULL && gst_caps_is_fixed (caps)' failed
+	  critical with e.g.
+	  gst-launch-1.0 rtpdtmfsrc ! rtpdtmfdepay ! audioconvert ! fakesink
+	  Not that the layout really matters in our case since we always
+	  output mono anyway, but non-interleaved requires adding AudioMeta,
+	  so this is the easiest fix.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7048>
+
+2024-06-13 18:23:46 +0200  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst/rtsp/gstrtspsrc.c:
+	  rtspsrc: fix invalid seqnum assertions
+	  Upon fatal errors the loop function will first post an error message
+	  then push out an EOS event.
+	  An application may react immediately to the error message by setting the
+	  state of the pipeline to NULL, meaning by the time we push out the EOS
+	  event PAUSED_TO_READY may have reset the seek seqnum to -1.
+	  While this is harmless, the assertion when setting an invalid seqnum
+	  isn't tidy, fix this by simply not resetting to INVALID as it serves no
+	  practical purpose and the next READY_TO_PAUSED will select a new seqnum
+	  anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7034>
+
+2024-06-11 19:03:21 +0000  Jakub Vaněk <linuxtardis@gmail.com>
+
+	* sys/v4l2/gstv4l2src.c:
+	  v4l2src: Interpret V4L2 report of sync loss as video signal loss
+	  Certain V4L2 drivers can report that a video receiver is seeing
+	  some signal, but that it is unable to synchronize to it. IOW: the driver
+	  can sometimes report V4L2_IN_ST_NO_SYNC and not report V4L2_IN_ST_NO_SIGNAL.
+	  In particular, I've seen the tc358743 (HDMI-to-CSI2 converter) driver
+	  sometimes report this when deployed to a fleet of embedded Raspberry Pis.
+	  The relevant kernel code is in [1]. The video output is not practically
+	  usable when V4L2_IN_ST_NO_SYNC is reported (only visually corrupted frames,
+	  sometimes with random "snow", are received). I assume that this happens when
+	  either the HDMI cable is poorly plugged in or damaged or when a CSI2 FFC
+	  cable is used and is damaged.
+	  The change in this commit is useful for detecting this working-but-not-really
+	  condition in application code. Applications already listening for the "Signal lost"
+	  message will gain the ability to handle this condition.
+	  There seem to be more V4L2 error flags like this, see [2]. However, I do not
+	  have practical experience with them and adding only V4L2_IN_ST_NO_SYNC seems
+	  like a safer option.
+	  [1]: https://github.com/raspberrypi/linux/blob/be8498ee21aa/drivers/media/i2c/tc358743.c#L1534
+	  [2]: https://www.kernel.org/doc/html/v6.6/userspace-api/media/v4l/vidioc-enuminput.html
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7027>
+
+2024-06-04 15:30:37 +0000  Corentin Damman <c.damman@intopix.com>
+
+	* ext/qt6/gstqsg6material.cc:
+	  gstqsg6material: fix RGB format support
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6997>
+
+2024-05-27 14:14:24 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/rtsp/gstrtspsrc.c:
+	  rtspsrc: Only update from the Content-Base header in the initial OPTION / DESCRIBE response
+	  Some servers send a new content base in the SETUP response, which is
+	  just the non-aggregate control URL of the individual streams.
+	  See https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3563
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6982>
+
+2024-05-26 14:03:11 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/rtsp/gstrtspsrc.c:
+	  rtspsrc: Handle the case of `*` as session-wide control URL from the SDP
+	  Just like the comment above says this is supposed to indicate that the
+	  same URL should be used as for the connection so far. If encountering
+	  this case simply do nothing.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6982>
+
+2024-05-26 14:02:12 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/rtsp/gstrtspsrc.c:
+	  rtspsrc: Also handle `rtsps://` and similar URLs as absolute in other places
+	  Previously a direct comparison with `rtsp://` was performed, which
+	  didn't catch cases like `rtsps://`.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3563
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6982>
+
+2024-05-26 13:00:02 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/rtsp/gstrtspsrc.c:
+	  rtspsrc: Don't try the SETUP workaround for broken servers with absolute control URIs
+	  Previously only control URIs that started with "rtsp://" were ignored
+	  but it makes more sense to ignore all absolute URIs.
+	  gst_uri_is_valid() conveniently checks for exactly that.
+	  See https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3563
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6982>
+
+2024-05-28 13:04:20 +0200  Edward Hervey <bilboed@bilboed.com>
+
+	* ext/adaptivedemux2/hls/m3u8.c:
+	  hlsdemux2: Minor refactoring of starting segment check
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-15 08:47:12 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/m3u8.c:
+	  hlsdemux2: Be more tolerant when matching segments with PDT
+	  Some servers might not provide 100% matching PDT when doing updates, or accross
+	  variants. This would cause the code matching segments using PDT to fail if the
+	  segment PDT was 1 microsecond (or whatever small value) before the candidate
+	  segment. And would pick the (wrong) following segment as the matching one.
+	  In order to be more tolerant when matching, we instead check whether the
+	  candidate segment is within the first segment of the segment we are trying to
+	  match.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-12 15:53:08 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/gsthlsdemux-stream.c:
+	  hlsdemux2: Fix failure to find a replacement segment on resync
+	  If we end up with a segment with an internal time that varies from the supposed
+	  one, this could be for two reasons:
+	  * We guess-timated the wrong segment to go to when advancing or switching
+	  variants. In that case we try to find the actual segment to go to (just before
+	  this change).
+	  * There was a complete playlist change (for whatever reason) and we can't find a
+	  replacement. In that case we want to carry on playback from this position but
+	  need to remember that we moved (by setting the stream to DISCONT, and
+	  resetting the new mapping).
+	  Fixes playback on several broken stream
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-12 15:52:23 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/gsthlsdemux-stream.c:
+	* ext/adaptivedemux2/hls/gsthlsdemux.c:
+	* ext/adaptivedemux2/hls/gsthlsdemux.h:
+	  hlsdemux2: Refactor update of GstHLSTimeMap values
+	  This was also missing transferring the PDT if present
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-12 15:48:34 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/m3u8.c:
+	  hlsdemux2: Fix parsing of EXT-X-DISCONTINUITY-SEQUENCE:0
+	  Since the default value of `m3u8->discont_sequence` (before parsing of the
+	  playlist data) was 0 .. we would never properly detect the presence of that
+	  field if it was present with a value of 0.
+	  This would later on cause havoc in playlist synchronization where we would
+	  assume it didn't have a discontinuity sequence specified (whereas it did, and it
+	  was 0).
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-12 15:45:16 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/gsthlsdemux-stream.c:
+	  hlsdemux2: Increase tolerance for discontinuity detection
+	  A lot of streams will do a poor job of estimating proper duration of fragments
+	  in the playlist, but over several fragments have it correct.
+	  Instead of constantly trying to realign the estimated stream time, allow for a
+	  more realistic tolerance of 3-4 video frames
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-11 16:37:36 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/gsthlsdemux-stream.c:
+	  hlsdemux2: Ensure a discont will be set when resetting for lost sync
+	  This is to ensures we inform the demuxer/parsers that what follows is not contiguous
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-11 15:30:27 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/gsthlsdemux-stream.c:
+	* ext/adaptivedemux2/hls/gsthlsdemux-stream.h:
+	* ext/adaptivedemux2/hls/gsthlsdemux.c:
+	* ext/adaptivedemux2/hls/m3u8.c:
+	* ext/adaptivedemux2/hls/m3u8.h:
+	  hlsdemux2: Fix handling of variant switching and playlist updates
+	  When updating playlists, we want to know whether the updated playlist is
+	  continuous with the previous one. That is : if we advance, will the next
+	  fragment need to have the DISCONT buffer set on it or not.
+	  If that happens (because we switched variants, or the playlist all of a sudden
+	  changed) we remember that there is a pending discont for the next fragment. That
+	  will be used and resetted the next time we get the fragment information.
+	  Previously this was only partially done. And it was racy because it was set
+	  directly on `GstAdaptiveDemux2Stream->discont` when a playlist was updated,
+	  instead of when the next fragment was prepared.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-11 15:19:50 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/gstadaptivedemux-stream.c:
+	  adaptivedemux2: Only set DISCONT on beginning of fragments
+	  This avoids accidentally setting it in the middle of a fragment, which could
+	  cause havoc in demuxer/parsers
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-04-08 16:13:13 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/hls/m3u8.c:
+	  hlsdemux2: Fix getting starting segment on live playlists
+	  When dealing with live streams, the function was assuming that all segments of
+	  the playlist had valid stream_time. But that isn't TRUE, for example in the case
+	  of failing to synchronize playlists.
+	  Fixes losing sync due to not being able to match playlist on updates
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6961>
+
+2024-05-13 11:08:15 +0300  Sergey Krivohatskiy <s.krivohatskiy@gmail.com>
+
+	* gst/audioparsers/gstflacparse.c:
+	  flacparse: fix buffer overflow in gst_flac_parse_frame_is_valid
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6960>
+
+2024-05-29 13:51:27 +0300  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.4
+
+=== release 1.24.4 ===
+
+2024-05-29 13:44:50 +0300  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-good.doap:
+	* meson.build:
+	  Release 1.24.4
+
+2024-05-21 17:49:33 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/gtk/gstgtkbasesink.c:
+	  gtk: Fail initialization of the sink if GTK4 is already initialized in the same process
+	  Initializing GTK3 and GTK4 in the same process does not work and is not
+	  supported.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6905>
+
+2024-05-21 17:49:42 +0200  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/osxaudio/gstosxcoreaudio.c:
+	* sys/osxaudio/gstosxcoreaudio.h:
+	* sys/osxaudio/gstosxcoreaudiocommon.h:
+	  osxaudio: Avoid using private APIs on iOS
+	  Turns out AudioConvertHostTimeToNanos and AudioGetCurrentHostTime are macOS-only APIs, which prevents apps using
+	  GStreamer on iOS from being accepted into App Store.
+	  This commit replaces those functions with a manual version of what they do - mach_absolute_time() for the current time,
+	  and data from mach_timebase_info() at the beginning to convert host timestamps to nanoseconds.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6899>
+
+2024-05-09 10:01:22 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/level/gstlevel.c:
+	  level: Don't post a message on EOS without a valid audio info
+	  If EOS is received before caps, e.g. because of an error, then rate and
+	  number of channels would be 0 and some divisions by zero would happen.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6828>
+
+2024-05-05 18:29:39 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* tests/check/elements/qtdemux.c:
+	  qtdemux: Use `G_GUINT64_CONSTANT` when creating test caps
+	  Otherwise this fails on 32 bit platforms.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3521
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6806>
+
+2024-04-30 00:36:59 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.3
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6772>
+
+=== release 1.24.3 ===
+
+2024-04-30 00:15:23 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-good.doap:
+	* meson.build:
+	  Release 1.24.3
+
+2024-04-22 10:40:13 -0400  William Wedler <william.wedler@videoray.com>
+
+	* ext/qt/qtitem.cc:
+	  fix: qmlglsink: video content resizes to new item size
+	  Mark geometry dirty when the item rectangle changes in the
+	  QtGLVideoItem::updatePaintNode method. This allows changes in the bounding
+	  rectangle to be applied to the scene graph geometry node.
+	  Fixes #3493
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6759>
+
+2024-04-22 10:35:18 -0400  William Wedler <william.wedler@videoray.com>
+
+	* ext/qt6/qt6glitem.cc:
+	  fix: qml6glsink: video content resizes to new item size
+	  Mark geometry dirty when the item rectangle changes in the
+	  QtGLVideoItem::updatePaintNode method. This allows changes in the bounding
+	  rectangle to be applied to the scene graph geometry node.
+	  Fixes #3493
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6759>
+
+2024-02-19 21:49:21 +0800  Tim Blechmann <tim@klingt.org>
+
+	* sys/v4l2/v4l2_calls.c:
+	  v4l2: silence valgrind warning
+	  Valgrind complains about uninitialized memory used in an ioctl
+	  Syscall param ioctl(VKI_V4L2_G_TUNER).reserved points to uninitialised byte(s)
+	  at 0x719294F: ioctl (ioctl.c:36)
+	  by 0x3126A817: gst_v4l2_fill_lists (v4l2_calls.c:185)
+	  by 0x3126A817: gst_v4l2_open (v4l2_calls.c:589)
+	  by 0x3123F1C2: gst_v4l2_device_provider_probe_device (gstv4l2deviceprovider.c:122)
+	  by 0x3123F648: gst_v4l2_device_provider_device_from_udev (gstv4l2deviceprovider.c:301)
+	  by 0x3123F998: provider_thread (gstv4l2deviceprovider.c:395)
+	  by 0x796FA50: ??? (in /usr/lib/x86_64-linux-gnu/libglib-2.0.so.0.7200.4)
+	  by 0x710CAC2: start_thread (pthread_create.c:442)
+	  by 0x719DA03: clone (clone.S:100)
+	  Address 0x44008a34 is on thread 11's stack
+	  in frame #1, created by gst_v4l2_open (v4l2_calls.c:524)
+	  Uninitialised value was created by a stack allocation
+	  at 0x3126A024: gst_v4l2_open (v4l2_calls.c:524)
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6761>
+
+2024-04-26 09:45:22 +0800  Tim Blechmann <tim@klingt.org>
+
+	* ext/soup/gstsouphttpsrc.c:
+	  soup: fix thread name
+	  thread names should be below 16char, otherwise they won't be shown on
+	  linux.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6739>
+
+2024-04-19 11:31:04 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/gstadaptivedemux.c:
+	  adaptivedemux2: Answer GST_QUERY_CAPS
+	  If we have a generic caps, we can answer the query.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6716>
+
+2024-04-19 11:29:25 +0200  Edward Hervey <edward@centricular.com>
+
+	* ext/adaptivedemux2/gstadaptivedemux.c:
+	  adaptivedemux2: Refactor output slot creation
+	  Set as much information as possible on the slot (including the associated
+	  track) *before* the associated source pad is added to the element.
+	  We need this so that incoming event/queries can be replied to if they are
+	  received when adding the pad
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6716>
+
+2024-04-05 17:30:01 +0200  Philipp Zabel <p.zabel@pengutronix.de>
+
+	* sys/v4l2/gstv4l2allocator.c:
+	  v4l2bufferpool: Ensure freshly created buffers are not marked as queued
+	  Otherwise, if we run in to the copy case, this can cause these
+	  groups to stay around with queued flag set, but never actually
+	  queued, until gst_v4l2_allocator_flush() is called, which then
+	  erroneously frees the associated memories, causing the release
+	  function to decrement the allocator refcount where it was never
+	  incremented, resulting in early allocator disposal, and either
+	  deadlock or use after free.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6685>
+
+2024-04-12 17:17:53 +0800  Qian Hu (胡骞) <qian.hu@mediatek.com>
+
+	* docs/gst_plugins_cache.json:
+	* sys/v4l2/gstv4l2object.c:
+	  v4l2: add multiplane y42b(yuv422m)
+	  for some jpg file, mediatek v4l2 jpeg decoder
+	  hardware produce multi plane YUV 4:2:2 data
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6657>
+
+2024-04-09 11:29:46 +0900  Hou Qi <qi.hou@nxp.com>
+
+	* sys/v4l2/gstv4l2bufferpool.c:
+	  v4l2bufferpool: queue back the buffer flagged LAST but empty
+	  Some decoder drivers need to wait enough capture buffers before
+	  starting to decode. But the dequeued buffer flag LAST but empty
+	  has no chance to queue back to driver, which makes decode hang
+	  after seek. So need to queue back such kind of buffer to driver.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6649>
+
+2024-04-05 14:09:18 +0200  Philipp Zabel <p.zabel@pengutronix.de>
+
+	* sys/v4l2/gstv4l2bufferpool.c:
+	  v4l2: bufferpool: Drop writable check on output pool process
+	  Output buffers don't have to be writable. Accepting read-only buffers
+	  from the V4L2 buffer pool allows upstream elements to write directly
+	  into the V4L2 buffers without triggering a CPU copy into a new buffer
+	  from the same V4L2 buffer pool every time.
+	  Tested with the vivid output device:
+	  GST_DEBUG=GST_PERFORMANCE:7 gst-launch-1.0 videotestsrc ! v4l2sink device=/dev/video5
+	  With this change, gst_v4l2_buffer_pool_dqbuf() must be allowed to not
+	  resize read-only memories of output buffers.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6648>
+
+2024-04-13 10:57:43 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/vpx/gstvpxcompat.h:
+	* ext/vpx/gstvpxdec.c:
+	  vpxdec: Include vpx error details in errors and warnings
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6636>
+
+2024-04-13 10:56:29 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/vpx/gstvp9enc.c:
+	  vp9enc: Include vpx error details in errors and warnings
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6636>
+
+2024-04-13 10:55:55 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/vpx/gstvpxcompat.h:
+	* ext/vpx/gstvpxenc.c:
+	  vpxenc: Rename GST_VPX_WARN to GST_VPX_ENC_WARN
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6636>
+
+2024-04-12 16:57:00 +0800  Qian Hu (胡骞) <qian.hu@mediatek.com>
+
+	* gst/isomp4/qtdemux.c:
+	  qtdemux: fix wrong full_range offset when parsing colr box
+	  use colr_data[18] >> 7 to get full range information, instead
+	  of colr_data[17] >> 7
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6634>
+
+2024-04-11 10:10:19 -0400  William Wedler <william.wedler@videoray.com>
+
+	* ext/qt6/qt6glitem.cc:
+	  fix: qml6glsink: Notify that the returned QSGNode node has changes
+	  Sets the QSGNode::DirtyMaterial bit when a new buffer is used for the material's texture
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3469
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6633>
+
+2024-04-07 19:39:58 +0900  Jimmy Ohn <yongjin.ohn@lge.com>
+
+	* ext/pulse/pulsedeviceprovider.c:
+	  pulsedeviceprovider: Add is_default_device_name function and missing lock
+	  Add is_default_device_name function to simplify compare device type
+	  name and fix the missing lock when accessing default_sink_name and
+	  default_source_name.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6599>
+
+2024-04-10 00:04:02 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.2
+
 === release 1.24.2 ===
 
 2024-04-09 21:48:55 +0100  Tim-Philipp Müller <tim@centricular.com>
