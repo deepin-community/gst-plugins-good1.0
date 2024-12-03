@@ -580,6 +580,8 @@ gst_matroska_demux_parse_colour (GstMatroskaDemux * demux, GstEbmlRead * ebml,
 {
   GstFlowReturn ret;
   GstVideoColorimetry colorimetry;
+  guint64 chroma_site_horz;
+  guint64 chroma_site_vert;
   guint32 id;
   guint64 num;
 
@@ -587,6 +589,9 @@ gst_matroska_demux_parse_colour (GstMatroskaDemux * demux, GstEbmlRead * ebml,
   colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_UNKNOWN;
   colorimetry.transfer = GST_VIDEO_TRANSFER_UNKNOWN;
   colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_UNKNOWN;
+  /* 0 = unknown, 1 = yes, 2 = no */
+  chroma_site_horz = 0;
+  chroma_site_vert = 0;
 
   DEBUG_ELEMENT_START (demux, ebml, "TrackVideoColour");
 
@@ -679,6 +684,22 @@ gst_matroska_demux_parse_colour (GstMatroskaDemux * demux, GstEbmlRead * ebml,
         break;
       }
 
+      case GST_MATROSKA_ID_VIDEOCHROMASITINGHORZ:{
+        if ((ret =
+                gst_ebml_read_uint (ebml, &id,
+                    &chroma_site_horz)) != GST_FLOW_OK)
+          goto beach;
+        break;
+      }
+
+      case GST_MATROSKA_ID_VIDEOCHROMASITINGVERT:{
+        if ((ret =
+                gst_ebml_read_uint (ebml, &id,
+                    &chroma_site_vert)) != GST_FLOW_OK)
+          goto beach;
+        break;
+      }
+
       default:
         GST_FIXME_OBJECT (demux, "Unsupported subelement 0x%x in Colour", id);
         ret = gst_ebml_read_skip (ebml);
@@ -688,6 +709,15 @@ gst_matroska_demux_parse_colour (GstMatroskaDemux * demux, GstEbmlRead * ebml,
 
   memcpy (&video_context->colorimetry, &colorimetry,
       sizeof (GstVideoColorimetry));
+
+  if (chroma_site_horz == 1 && chroma_site_vert == 1)
+    video_context->chroma_site = GST_VIDEO_CHROMA_SITE_COSITED;
+  else if (chroma_site_horz == 1 && chroma_site_vert == 2)
+    video_context->chroma_site = GST_VIDEO_CHROMA_SITE_H_COSITED;
+  else if (chroma_site_horz == 2 && chroma_site_vert == 1)
+    video_context->chroma_site = GST_VIDEO_CHROMA_SITE_V_COSITED;
+  else if (chroma_site_horz == 2 && chroma_site_vert == 2)
+    video_context->chroma_site = GST_VIDEO_CHROMA_SITE_NONE;
 
 beach:
   DEBUG_ELEMENT_STOP (demux, ebml, "TrackVideoColour", ret);
@@ -1134,6 +1164,164 @@ gst_matroska_demux_parse_stream (GstMatroskaDemux * demux, GstEbmlRead * ebml,
                 videocontext->alpha_mode = TRUE;
               else
                 videocontext->alpha_mode = FALSE;
+              break;
+            }
+
+            case GST_MATROSKA_ID_VIDEOPROJECTION:
+            {
+              gboolean supported = TRUE;
+              gboolean found_type = FALSE;
+              gboolean found_yaw = FALSE;
+              gboolean found_pitch = FALSE;
+              gboolean found_roll = FALSE;
+              gdouble pose_yaw;
+              gdouble pose_roll;
+
+              if ((ret = gst_ebml_read_master (ebml, &id)) != GST_FLOW_OK)
+                break;
+
+              while (ret == GST_FLOW_OK &&
+                  gst_ebml_read_has_remaining (ebml, 1, TRUE)) {
+                if ((ret = gst_ebml_peek_id (ebml, &id)) != GST_FLOW_OK)
+                  break;
+
+                switch (id) {
+                  case GST_MATROSKA_ID_VIDEOPROJECTIONTYPE:{
+                    guint64 num;
+
+                    if ((ret =
+                            gst_ebml_read_uint (ebml, &id,
+                                &num)) != GST_FLOW_OK)
+                      break;
+
+                    if (num != 0) {
+                      supported = FALSE;
+                      GST_WARNING_OBJECT (demux,
+                          "ProjectionType value not supported: %"
+                          G_GUINT64_FORMAT, num);
+                    }
+
+                    found_type = TRUE;
+                    break;
+                  }
+
+                  case GST_MATROSKA_ID_VIDEOPROJECTIONPRIVATE:{
+                    supported = FALSE;
+                    ret = gst_ebml_read_skip (ebml);
+                    GST_WARNING_OBJECT (demux,
+                        "ProjectionPrivate not supported");
+                    break;
+                  }
+
+                  case GST_MATROSKA_ID_VIDEOPROJECTIONPOSEYAW:{
+                    if ((ret =
+                            gst_ebml_read_float (ebml, &id,
+                                &pose_yaw)) != GST_FLOW_OK)
+                      break;
+
+                    if (!(G_APPROX_VALUE (pose_yaw, 0.0, FLT_EPSILON)
+                            || G_APPROX_VALUE (pose_yaw, 180.0, FLT_EPSILON)
+                            || G_APPROX_VALUE (pose_yaw, -180.0, FLT_EPSILON))) {
+                      supported = FALSE;
+                      GST_WARNING_OBJECT (demux,
+                          "ProjectionPoseYaw value not supported: %f",
+                          pose_yaw);
+                    }
+
+                    found_yaw = TRUE;
+                    break;
+                  }
+
+                  case GST_MATROSKA_ID_VIDEOPROJECTIONPOSEPITCH:{
+                    gdouble pose_pitch;
+
+                    if ((ret =
+                            gst_ebml_read_float (ebml, &id,
+                                &pose_pitch)) != GST_FLOW_OK)
+                      break;
+
+                    if (!G_APPROX_VALUE (pose_pitch, 0.0, FLT_EPSILON)) {
+                      supported = FALSE;
+                      GST_WARNING_OBJECT (demux,
+                          "ProjectionPosePitch value not supported: %f",
+                          pose_pitch);
+                    }
+
+                    found_pitch = TRUE;
+                    break;
+                  }
+
+                  case GST_MATROSKA_ID_VIDEOPROJECTIONPOSEROLL:{
+                    if ((ret =
+                            gst_ebml_read_float (ebml, &id,
+                                &pose_roll)) != GST_FLOW_OK)
+                      break;
+
+                    if (!(G_APPROX_VALUE (pose_roll, 0.0, FLT_EPSILON)
+                            || G_APPROX_VALUE (pose_roll, 90.0, FLT_EPSILON)
+                            || G_APPROX_VALUE (pose_roll, -90.0, FLT_EPSILON)
+                            || G_APPROX_VALUE (pose_roll, 180.0, FLT_EPSILON)
+                            || G_APPROX_VALUE (pose_roll, -180.0, FLT_EPSILON))) {
+                      supported = FALSE;
+                      GST_WARNING_OBJECT (demux,
+                          "ProjectionPoseRoll value not supported: %f",
+                          pose_roll);
+                    }
+
+                    found_roll = TRUE;
+                    break;
+                  }
+
+                  default:
+                    ret = gst_ebml_read_skip (ebml);
+                    break;
+                }
+              }
+
+              if (supported && found_type && found_yaw && found_pitch &&
+                  found_roll) {
+                const gchar *rotation_tag = NULL;
+                gboolean flip;
+
+                flip = G_APPROX_VALUE (pose_yaw, 180.0, FLT_EPSILON)
+                    || G_APPROX_VALUE (pose_yaw, -180.0, FLT_EPSILON);
+
+                if (G_APPROX_VALUE (pose_roll, 0.0, FLT_EPSILON)) {
+                  if (flip)
+                    rotation_tag = "flip-rotate-0";
+                  else
+                    rotation_tag = "rotate-0";
+                } else if (G_APPROX_VALUE (pose_roll, 180.0, FLT_EPSILON)
+                    || G_APPROX_VALUE (pose_roll, -180.0, FLT_EPSILON)) {
+                  if (flip)
+                    rotation_tag = "flip-rotate-180";
+                  else
+                    rotation_tag = "rotate-180";
+                } else if (G_APPROX_VALUE (pose_roll, 90.0, FLT_EPSILON)) {
+                  if (flip)
+                    rotation_tag = "flip-rotate-270";
+                  else
+                    rotation_tag = "rotate-270";
+                } else if (G_APPROX_VALUE (pose_roll, -90.0, FLT_EPSILON)) {
+                  if (flip)
+                    rotation_tag = "flip-rotate-90";
+                  else
+                    rotation_tag = "rotate-90";
+                } else {
+                  GST_FIXME_OBJECT (demux,
+                      "Unhandled transformation matrix values");
+                }
+
+                if (rotation_tag) {
+                  gst_tag_list_add (context->tags, GST_TAG_MERGE_REPLACE,
+                      GST_TAG_IMAGE_ORIENTATION, rotation_tag, NULL);
+                  context->tags_changed = TRUE;
+                }
+              } else {
+                GST_WARNING_OBJECT (demux,
+                    "Some Projection value not supported or missing - ignoring");
+              }
+
               break;
             }
 
@@ -5777,9 +5965,11 @@ gst_matroska_demux_parse_id (GstMatroskaDemux * demux, guint32 id,
             demux->seek_block = 0;
           }
           demux->seek_first = FALSE;
-          /* record next cluster for recovery */
+          /* record next cluster for recovery, set to 0 if offset isn't known. */
           if (read != G_MAXUINT64)
             demux->next_cluster_offset = demux->cluster_offset + read;
+          else
+            demux->next_cluster_offset = 0;
           /* eat cluster prefix */
           gst_matroska_demux_flush (demux, needed);
           break;
@@ -6907,6 +7097,14 @@ gst_matroska_demux_video_caps (GstMatroskaTrackVideoContext *
           (&videocontext->content_light_level, caps)) {
         GST_WARNING ("couldn't set content light level to caps");
       }
+    }
+
+    if (videocontext->chroma_site != GST_VIDEO_CHROMA_SITE_UNKNOWN) {
+      gchar *chroma =
+          gst_video_chroma_site_to_string (videocontext->chroma_site);
+      gst_caps_set_simple (caps, "chroma-site", G_TYPE_STRING, chroma, NULL);
+      GST_DEBUG ("setting chroma site to %s", chroma);
+      g_free (chroma);
     }
 
     caps = gst_caps_simplify (caps);

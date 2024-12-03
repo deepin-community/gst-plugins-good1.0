@@ -144,6 +144,8 @@
 #define GST_MATROSKA_ID_VIDEOCOLOUR                0x55B0
 /* IDs in the Colour master*/
 #define GST_MATROSKA_ID_VIDEOMATRIXCOEFFICIENTS    0x55B1
+#define GST_MATROSKA_ID_VIDEOCHROMASITINGHORZ      0x55B7
+#define GST_MATROSKA_ID_VIDEOCHROMASITINGVERT      0x55B8
 #define GST_MATROSKA_ID_VIDEORANGE                 0x55B9
 #define GST_MATROSKA_ID_VIDEOTRANSFERCHARACTERISTICS  0x55BA
 #define GST_MATROSKA_ID_VIDEOPRIMARIES             0x55BB
@@ -161,6 +163,14 @@
 #define GST_MATROSKA_ID_WHITEPOINTCHROMATICITYY    0x55D8
 #define GST_MATROSKA_ID_LUMINANCEMAX               0x55D9
 #define GST_MATROSKA_ID_LUMINANCEMIN               0x55DA
+
+#define GST_MATROSKA_ID_VIDEOPROJECTION            0x7670
+/* IDs in the Projection master*/
+#define GST_MATROSKA_ID_VIDEOPROJECTIONTYPE        0x7671
+#define GST_MATROSKA_ID_VIDEOPROJECTIONPRIVATE     0x7672
+#define GST_MATROSKA_ID_VIDEOPROJECTIONPOSEYAW     0x7673
+#define GST_MATROSKA_ID_VIDEOPROJECTIONPOSEPITCH   0x7674
+#define GST_MATROSKA_ID_VIDEOPROJECTIONPOSEROLL    0x7675
 
 /* IDs in the TrackAudio master */
 #define GST_MATROSKA_ID_AUDIOSAMPLINGFREQ          0xB5
@@ -647,6 +657,7 @@ typedef struct _GstMatroskaTrackVideoContext {
 
   GstBuffer     *dirac_unit;
   GstVideoColorimetry colorimetry;
+  GstVideoChromaSite chroma_site;
 
   GstVideoMasteringDisplayInfo mastering_display_info;
   gboolean mastering_display_info_present;

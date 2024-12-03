@@ -1153,8 +1153,12 @@ gst_matroska_mux_video_pad_setcaps (GstPad * pad, GstCaps * caps)
   if (interlace_mode != NULL) {
     if (strcmp (interlace_mode, "progressive") == 0)
       videocontext->interlace_mode = GST_MATROSKA_INTERLACE_MODE_PROGRESSIVE;
-    else
+    else {
       videocontext->interlace_mode = GST_MATROSKA_INTERLACE_MODE_INTERLACED;
+      if ((s = gst_structure_get_string (structure, "field-order"))) {
+        videocontext->field_order = gst_video_field_order_from_string (s);
+      }
+    }
   } else {
     videocontext->interlace_mode = GST_MATROSKA_INTERLACE_MODE_UNKNOWN;
   }
@@ -1198,6 +1202,9 @@ gst_matroska_mux_video_pad_setcaps (GstPad * pad, GstCaps * caps)
   } else {
     videocontext->display_width = 0;
     videocontext->display_height = 0;
+  }
+  if ((s = gst_structure_get_string (structure, "chroma-site"))) {
+    videocontext->chroma_site = gst_video_chroma_site_from_string (s);
   }
 
   if ((s = gst_structure_get_string (structure, "colorimetry"))) {
@@ -2788,6 +2795,9 @@ gst_matroska_mux_write_colour (GstMatroskaMux * mux,
   guint range_id = 0;
   guint transfer_id = 0;
   guint primaries_id = 0;
+  /* 0 = unknown, 1 = yes, 2 = no */
+  guint chroma_site_horz = 0;
+  guint chroma_site_vert = 0;
 
   master = gst_ebml_write_master_start (ebml, GST_MATROSKA_ID_VIDEOCOLOUR);
 
@@ -2808,6 +2818,15 @@ gst_matroska_mux_write_colour (GstMatroskaMux * mux,
   primaries_id =
       gst_video_color_primaries_to_iso (videocontext->colorimetry.primaries);
 
+  if (videocontext->chroma_site != GST_VIDEO_CHROMA_SITE_UNKNOWN) {
+    chroma_site_horz = 2;
+    chroma_site_vert = 2;
+    if (videocontext->chroma_site & GST_VIDEO_CHROMA_SITE_H_COSITED)
+      chroma_site_horz = 1;
+    if (videocontext->chroma_site & GST_VIDEO_CHROMA_SITE_V_COSITED)
+      chroma_site_vert = 1;
+  }
+
   gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEORANGE, range_id);
   gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOMATRIXCOEFFICIENTS,
       matrix_id);
@@ -2821,22 +2840,94 @@ gst_matroska_mux_write_colour (GstMatroskaMux * mux,
     gst_ebml_write_uint (ebml, GST_MATROSKA_ID_MAXFALL,
         videocontext->content_light_level.max_frame_average_light_level);
   }
+  if (chroma_site_horz != 0 && chroma_site_vert != 0) {
+    gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOCHROMASITINGHORZ,
+        chroma_site_horz);
+    gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOCHROMASITINGVERT,
+        chroma_site_vert);
+  }
 
   gst_matroska_mux_write_mastering_metadata (mux, videocontext);
   gst_ebml_write_master_finish (ebml, master);
 }
 
-/**
- * gst_matroska_mux_track_header:
- * @mux: #GstMatroskaMux
- * @context: Tack context.
- *
- * Write a track header.
- */
+static void
+gst_matroska_mux_write_projection (GstMatroskaMux * mux,
+    GstMatroskaPad * collect_pad)
+{
+  GstEbmlWrite *ebml = mux->ebml_write;
+  gchar *orientation;
+  guint64 master;
+  float yaw, roll;
+
+  if (!collect_pad->tags ||
+      !gst_tag_list_get_string (collect_pad->tags, GST_TAG_IMAGE_ORIENTATION,
+          &orientation)) {
+    const GstTagList *global_tags;
+
+    global_tags = gst_tag_setter_get_tag_list (GST_TAG_SETTER (mux));
+    if (!global_tags ||
+        !gst_tag_list_get_string (global_tags, GST_TAG_IMAGE_ORIENTATION,
+            &orientation))
+      return;
+  }
+
+  if (!g_strcmp0 ("rotate-0", orientation)) {
+    yaw = 0.0;
+    roll = 0.0;
+  } else if (!g_strcmp0 ("rotate-90", orientation)) {
+    yaw = 0.0;
+    roll = -90.0;
+  } else if (!g_strcmp0 ("rotate-180", orientation)) {
+    yaw = 0.0;
+    roll = 180.0;
+  } else if (!g_strcmp0 ("rotate-270", orientation)) {
+    yaw = 0.0;
+    roll = 90.0;
+  } else if (!g_strcmp0 ("flip-rotate-0", orientation)) {
+    yaw = 180.0;
+    roll = 0.0;
+  } else if (!g_strcmp0 ("flip-rotate-90", orientation)) {
+    yaw = 180.0;
+    roll = -90.0;
+  } else if (!g_strcmp0 ("flip-rotate-180", orientation)) {
+    yaw = 180.0;
+    roll = 180.0;
+  } else if (!g_strcmp0 ("flip-rotate-270", orientation)) {
+    yaw = 180.0;
+    roll = 90.0;
+  } else {
+    GST_FIXME_OBJECT (mux, "Unsupported orientation %s", orientation);
+    yaw = 0.0;
+    roll = 0.0;
+  }
+
+  /* Default projection, skip writing */
+  if (yaw == 0.0 && roll == 0.0) {
+    g_free (orientation);
+    return;
+  }
+
+  master = gst_ebml_write_master_start (ebml, GST_MATROSKA_ID_VIDEOPROJECTION);
+
+  gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOPROJECTIONTYPE, 0);
+  gst_ebml_write_float (ebml, GST_MATROSKA_ID_VIDEOPROJECTIONPOSEYAW, yaw);
+  gst_ebml_write_float (ebml, GST_MATROSKA_ID_VIDEOPROJECTIONPOSEPITCH, 0.0);
+  gst_ebml_write_float (ebml, GST_MATROSKA_ID_VIDEOPROJECTIONPOSEROLL, roll);
+
+  gst_ebml_write_master_finish (ebml, master);
+
+  GST_INFO_OBJECT (mux,
+      "Wrote projection type: 0 yaw: %f pitch: 0.0 row: %f from tag: %s", yaw,
+      roll, orientation);
+  g_free (orientation);
+}
+
 static void
 gst_matroska_mux_track_header (GstMatroskaMux * mux,
-    GstMatroskaTrackContext * context)
+    GstMatroskaPad * collect_pad)
 {
+  GstMatroskaTrackContext *context = collect_pad->track;
   GstEbmlWrite *ebml = mux->ebml_write;
   guint64 master;
 
@@ -2884,6 +2975,18 @@ gst_matroska_mux_track_header (GstMatroskaMux * mux,
       switch (videocontext->interlace_mode) {
         case GST_MATROSKA_INTERLACE_MODE_INTERLACED:
           gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOFLAGINTERLACED, 1);
+          if (videocontext->field_order != GST_VIDEO_FIELD_ORDER_UNKNOWN) {
+            if (videocontext->field_order ==
+                GST_VIDEO_FIELD_ORDER_TOP_FIELD_FIRST) {
+              gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOFIELDORDER, 9);
+            } else if (videocontext->field_order ==
+                GST_VIDEO_FIELD_ORDER_BOTTOM_FIELD_FIRST) {
+              gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOFIELDORDER, 14);
+            } else {
+              GST_FIXME_OBJECT (mux, "unhandled video field order %d",
+                  videocontext->field_order);
+            }
+          }
           break;
         case GST_MATROSKA_INTERLACE_MODE_PROGRESSIVE:
           gst_ebml_write_uint (ebml, GST_MATROSKA_ID_VIDEOFLAGINTERLACED, 2);
@@ -2898,7 +3001,10 @@ gst_matroska_mux_track_header (GstMatroskaMux * mux,
         gst_ebml_write_binary (ebml, GST_MATROSKA_ID_VIDEOCOLOURSPACE,
             (gpointer) & fcc_le, 4);
       }
+
       gst_matroska_mux_write_colour (mux, videocontext);
+      gst_matroska_mux_write_projection (mux, collect_pad);
+
       if (videocontext->multiview_mode != GST_VIDEO_MULTIVIEW_MODE_NONE) {
         guint64 stereo_mode = 0;
 
@@ -3142,6 +3248,21 @@ gst_matroska_mux_write_chapter_edition (GstMatroskaMux * mux,
   return internal_edition;
 }
 
+static gboolean
+gst_matroska_pads_is_audio_only (GstMatroskaMux * mux)
+{
+  for (GSList * collected = mux->collect->data; collected;
+      collected = g_slist_next (collected)) {
+    GstMatroskaPad *collect_pad = (GstMatroskaPad *) collected->data;
+
+    if (collect_pad->track->type != GST_MATROSKA_TRACK_TYPE_AUDIO) {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
 /**
  * gst_matroska_mux_start:
  * @mux: #GstMatroskaMux
@@ -3203,7 +3324,7 @@ gst_matroska_mux_start (GstMatroskaMux * mux, GstMatroskaPad * first_pad,
   gst_pad_push_event (mux->srcpad, gst_event_new_stream_start (s_id));
 
   /* output caps */
-  audio_only = mux->num_v_streams == 0 && mux->num_a_streams > 0;
+  audio_only = gst_matroska_pads_is_audio_only (mux);
   if (mux->is_webm) {
     media_type = (audio_only) ? "audio/webm" : "video/webm";
   } else {
@@ -3213,9 +3334,9 @@ gst_matroska_mux_start (GstMatroskaMux * mux, GstMatroskaPad * first_pad,
   gst_pad_set_caps (mux->srcpad, ebml->caps);
   /* we start with a EBML header */
   doctype = mux->doctype;
-  GST_INFO_OBJECT (ebml, "DocType: %s, Version: %d",
-      doctype, mux->doctype_version);
-  gst_ebml_write_header (ebml, doctype, mux->doctype_version);
+  GST_INFO_OBJECT (ebml, "DocType: %s, Version: 4/%d", doctype,
+      mux->doctype_version);
+  gst_ebml_write_header (ebml, doctype, 4, mux->doctype_version);
 
   /* the rest of the header is cached */
   gst_ebml_write_set_cache (ebml, 0x1000);
@@ -3374,7 +3495,7 @@ gst_matroska_mux_start (GstMatroskaMux * mux, GstMatroskaPad * first_pad,
 
     collect_pad->track->num = tracknum++;
     child = gst_ebml_write_master_start (ebml, GST_MATROSKA_ID_TRACKENTRY);
-    gst_matroska_mux_track_header (mux, collect_pad->track);
+    gst_matroska_mux_track_header (mux, collect_pad);
     gst_ebml_write_master_finish (ebml, child);
     /* some remaining pad/track setup */
     collect_pad->default_duration_scaled =
@@ -4008,7 +4129,7 @@ gst_matroska_mux_write_data (GstMatroskaMux * mux, GstMatroskaPad * collect_pad,
   guint64 block_duration, duration_diff = 0;
   gboolean is_video_keyframe = FALSE;
   gboolean is_video_invisible = FALSE;
-  gboolean is_audio_only = FALSE;
+  gboolean is_audio_only = FALSE, is_audio = FALSE;
   gboolean is_min_duration_reached = FALSE;
   gboolean is_max_duration_exceeded = FALSE;
   GstMatroskamuxPad *pad;
@@ -4094,8 +4215,9 @@ gst_matroska_mux_write_data (GstMatroskaMux * mux, GstMatroskaPad * collect_pad,
    * related arithmetic, so apply the timestamp offset if we have one */
   buffer_timestamp += mux->cluster_timestamp_offset;
 
-  is_audio_only = (collect_pad->track->type == GST_MATROSKA_TRACK_TYPE_AUDIO) &&
-      (mux->num_streams == 1);
+  is_audio_only = gst_matroska_pads_is_audio_only (mux);
+  is_audio = collect_pad->track->type == GST_MATROSKA_TRACK_TYPE_AUDIO;
+
   is_min_duration_reached = (mux->min_cluster_duration == 0
       || (buffer_timestamp > mux->cluster_time
           && (buffer_timestamp - mux->cluster_time) >=
@@ -4256,7 +4378,7 @@ gst_matroska_mux_write_data (GstMatroskaMux * mux, GstMatroskaPad * collect_pad,
     flags |= 0x08;
 
   if (mux->doctype_version > 1 && !write_duration && !cmeta) {
-    if (is_video_keyframe)
+    if (is_video_keyframe || is_audio)
       flags |= 0x80;
 
     hdr =
