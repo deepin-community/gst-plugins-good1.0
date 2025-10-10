@@ -111,7 +111,7 @@ gst_v4l2_video_enc_open (GstVideoEncoder * encoder)
 {
   GstV4l2VideoEnc *self = GST_V4L2_VIDEO_ENC (encoder);
   GstV4l2Error error = GST_V4L2_ERROR_INIT;
-  GstCaps *codec_caps;
+  GstCaps *tmp_caps, *codec_caps;
 
   GST_DEBUG_OBJECT (self, "Opening");
 
@@ -123,6 +123,15 @@ gst_v4l2_video_enc_open (GstVideoEncoder * encoder)
 
   self->probed_sinkcaps = gst_v4l2_object_probe_caps (self->v4l2output,
       gst_v4l2_object_get_raw_caps ());
+
+  /*
+   * Relax the framerate to always allow 0/1 regardless of what the driver
+   * wants. This improve compatibility of the encoder with sources which may
+   * not know the frame rate
+   */
+  tmp_caps = gst_caps_copy (self->probed_sinkcaps);
+  gst_caps_set_simple (tmp_caps, "framerate", GST_TYPE_FRACTION, 0, 1, NULL);
+  gst_caps_append (self->probed_sinkcaps, tmp_caps);
 
   if (gst_caps_is_empty (self->probed_sinkcaps))
     goto no_raw_format;
@@ -818,9 +827,9 @@ gst_v4l2_video_enc_handle_frame (GstVideoEncoder * encoder,
           gst_object_unref (opool);
         goto activate_failed;
       }
-      if (opool)
-        gst_object_unref (opool);
     }
+    if (opool)
+      gst_object_unref (opool);
   }
 
   if (task_state == GST_TASK_STOPPED || task_state == GST_TASK_PAUSED) {
@@ -1240,6 +1249,7 @@ gst_v4l2_video_enc_register (GstPlugin * plugin, GType type,
   GValue value = G_VALUE_INIT;
 
   filtered_caps = gst_caps_intersect (src_caps, codec_caps);
+  GST_MINI_OBJECT_FLAG_SET (filtered_caps, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
 
   if (codec != NULL && video_fd != -1) {
     if (gst_v4l2_codec_probe_levels (codec, video_fd, &value)) {
@@ -1256,7 +1266,7 @@ gst_v4l2_video_enc_register (GstPlugin * plugin, GType type,
   cdata = g_new0 (GstV4l2VideoEncCData, 1);
   cdata->device = g_strdup (device_path);
   cdata->sink_caps = gst_caps_ref (sink_caps);
-  cdata->src_caps = gst_caps_ref (filtered_caps);
+  cdata->src_caps = filtered_caps;
   cdata->codec = codec;
 
   g_type_query (type, &type_query);
