@@ -1,1 +1,16 @@
 0000_remove-flv-test.patch
+0001-wavparse-Don-t-error-out-always-when-parsing-acid-ch.patch
+0002-twcc-Fix-reference-timestamp-wrapping-again.patch
+0003-qtdemux-Fix-incorrect-FourCC-used-when-iterating-ove.patch
+0004-mpg123audiodec-Always-break-the-decoding-loop-and-re.patch
+0005-qt-Fix-building-examples-on-macOS.patch
+0006-qtdemux-fix-open-seek-perf-for-GoPro-files-with-SOS-.patch
+0007-v4l2videoenc-fix-memory-leak-about-output-state-and-.patch
+0008-rtph263pay-Fix-Out-of-bounds-access-OVERRUN.patch
+0009-qtdemux-Fix-out-of-bounds-read-when-parsing-PlayRead.patch
+0010-wavparse-Remove-pointless-duplicated-GST_ROUND_UP_2.patch
+0011-wavparse-Use-unsigned-integers-for-data-sizes.patch
+0012-wavparse-Use-GST_ROUND_UP_2-in-two-more-places-inste.patch
+0013-wavparse-Define-maximum-chunk-size-in-a-single-place.patch
+0014-wavparse-Avoid-integer-overflow-and-out-of-bounds-re.patch
+0015-rtpqdm2depay-error-out-if-anyone-tries-to-use-this-e.patch

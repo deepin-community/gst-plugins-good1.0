@@ -1,0 +1,26 @@
+From: =?utf-8?b?IlFpYW4gSHUgKOiDoemqniki?= <qian.hu@mediatek.com>
+Date: Thu, 6 Nov 2025 17:37:49 +0800
+Subject: v4l2videoenc: fix memory leak about output state and caps
+
+since gst_video_encoder_get_output_state will add ref count,
+we should decrease it after use
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10034>
+---
+ sys/v4l2/gstv4l2videoenc.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sys/v4l2/gstv4l2videoenc.c b/sys/v4l2/gstv4l2videoenc.c
+index b4317cf..25e6a68 100644
+--- a/sys/v4l2/gstv4l2videoenc.c
++++ b/sys/v4l2/gstv4l2videoenc.c
+@@ -622,6 +622,9 @@ gst_v4l2_video_enc_negotiate (GstVideoEncoder * encoder)
+   if (codec->level_cid)
+     gst_structure_set (s, "level", G_TYPE_STRING, ctx.level, NULL);
+ 
++  gst_video_codec_state_unref (state);
++  state = NULL;
++
+ done:
+   if (!GST_VIDEO_ENCODER_CLASS (parent_class)->negotiate (encoder))
+     return FALSE;
