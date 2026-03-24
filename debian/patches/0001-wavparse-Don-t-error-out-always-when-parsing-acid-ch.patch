@@ -1,0 +1,25 @@
+From: =?utf-8?q?Sebastian_Dr=C3=B6ge?= <sebastian@centricular.com>
+Date: Tue, 17 Jun 2025 14:39:49 +0300
+Subject: wavparse: Don't error out always when parsing acid chunks
+
+Remove stray goto introduced in ba8fd35e72b645c5048813d1bcc58271fb72ab6c
+
+Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4495
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9383>
+---
+ gst/wavparse/gstwavparse.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/gst/wavparse/gstwavparse.c b/gst/wavparse/gstwavparse.c
+index 90024b3..5adccff 100644
+--- a/gst/wavparse/gstwavparse.c
++++ b/gst/wavparse/gstwavparse.c
+@@ -1481,7 +1481,6 @@ gst_wavparse_stream_headers (GstWavParse * wav)
+           buf = NULL;
+           res =
+               gst_wavparse_pull_range_exact (wav, wav->offset + 8, size, &buf);
+-          goto header_pull_error;
+           if (res == GST_FLOW_EOS)
+             break;
+           else if (res != GST_FLOW_OK)

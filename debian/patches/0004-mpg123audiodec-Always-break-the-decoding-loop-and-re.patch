@@ -1,0 +1,64 @@
+From: =?utf-8?q?Sebastian_Dr=C3=B6ge?= <sebastian@centricular.com>
+Date: Wed, 10 Sep 2025 16:38:33 +0300
+Subject: mpg123audiodec: Always break the decoding loop and return downstream
+ flow errors
+
+mpg123audiodec can currently run into a situation where it always returns
+GST_FLOW_OK even with downstream always returns any kind of error, including
+GST_FLOW_FLUSHING which causes problems during shutdown.
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9722>
+---
+ ext/mpg123/gstmpg123audiodec.c | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/ext/mpg123/gstmpg123audiodec.c b/ext/mpg123/gstmpg123audiodec.c
+index ed6430e..dbebf56 100644
+--- a/ext/mpg123/gstmpg123audiodec.c
++++ b/ext/mpg123/gstmpg123audiodec.c
+@@ -475,8 +475,13 @@ gst_mpg123_audio_dec_handle_frame (GstAudioDecoder * dec,
+          * with mp3s containing several format headers (for example, first half
+          * using 44.1kHz, second half 32 kHz) */
+ 
+-        gst_mpg123_audio_dec_push_decoded_bytes (mpg123_decoder, decoded_bytes,
+-            num_decoded_bytes, clip_start, clip_end);
++        retval =
++            gst_mpg123_audio_dec_push_decoded_bytes (mpg123_decoder,
++            decoded_bytes, num_decoded_bytes, clip_start, clip_end);
++        if (retval != GST_FLOW_OK) {
++          loop = FALSE;
++          break;
++        }
+ 
+         GST_LOG_OBJECT (dec,
+             "mpg123 reported a new format -> setting next srccaps");
+@@ -501,20 +506,26 @@ gst_mpg123_audio_dec_handle_frame (GstAudioDecoder * dec,
+         GST_LOG_OBJECT (dec, "mpg123 needs more data to continue decoding");
+         retval = gst_mpg123_audio_dec_push_decoded_bytes (mpg123_decoder,
+             decoded_bytes, num_decoded_bytes, clip_start, clip_end);
++        if (retval != GST_FLOW_OK)
++          loop = FALSE;
+         break;
+ 
+       case MPG123_OK:
+         retval = gst_mpg123_audio_dec_push_decoded_bytes (mpg123_decoder,
+             decoded_bytes, num_decoded_bytes, clip_start, clip_end);
++        if (retval != GST_FLOW_OK)
++          loop = FALSE;
+         break;
+ 
+       case MPG123_DONE:
+         /* If this happens, then the upstream parser somehow missed the ending
+          * of the bitstream */
+-        gst_mpg123_audio_dec_push_decoded_bytes (mpg123_decoder, decoded_bytes,
+-            num_decoded_bytes, clip_start, clip_end);
++        retval =
++            gst_mpg123_audio_dec_push_decoded_bytes (mpg123_decoder,
++            decoded_bytes, num_decoded_bytes, clip_start, clip_end);
+         GST_LOG_OBJECT (dec, "mpg123 is done decoding");
+-        retval = GST_FLOW_EOS;
++        if (retval == GST_FLOW_OK)
++          retval = GST_FLOW_EOS;
+         loop = FALSE;
+         break;
+ 

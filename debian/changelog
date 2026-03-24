@@ -1,3 +1,28 @@
+gst-plugins-good1.0 (1.24.13-0deepin1) unstable; urgency=medium
+
+  * New upstream version 1.24.13:
+    Fixes: CVE-2025-47183, CVE-2025-47219
+  * Revert Breaks libv4l-0 and libv4lconvert0 (<< 1.26.1-4~)
+  * Apply 15 patches from upstream 1.24 branch:
+    d/patches/0001-wavparse-Don-t-error-out-always-when-parsing-acid-ch.patch
+    d/patches/0002-twcc-Fix-reference-timestamp-wrapping-again.patch
+    d/patches/0003-qtdemux-Fix-incorrect-FourCC-used-when-iterating-ove.patch
+    d/patches/0004-mpg123audiodec-Always-break-the-decoding-loop-and-re.patch
+    d/patches/0005-qt-Fix-building-examples-on-macOS.patch
+    d/patches/0006-qtdemux-fix-open-seek-perf-for-GoPro-files-with-SOS-.patch
+    d/patches/0007-v4l2videoenc-fix-memory-leak-about-output-state-and-.patch
+    d/patches/0008-rtph263pay-Fix-Out-of-bounds-access-OVERRUN.patch
+    d/patches/0009-qtdemux-Fix-out-of-bounds-read-when-parsing-PlayRead.patch
+    d/patches/0010-wavparse-Remove-pointless-duplicated-GST_ROUND_UP_2.patch
+    d/patches/0011-wavparse-Use-unsigned-integers-for-data-sizes.patch
+    d/patches/0012-wavparse-Use-GST_ROUND_UP_2-in-two-more-places-inste.patch
+    d/patches/0013-wavparse-Define-maximum-chunk-size-in-a-single-place.patch
+    d/patches/0014-wavparse-Avoid-integer-overflow-and-out-of-bounds-re.patch
+    d/patches/0015-rtpqdm2depay-error-out-if-anyone-tries-to-use-this-e.patch
+    Fixes: CVE-2026-1940, CVE-2026-3083, CVE-2026-3085
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Tue, 24 Mar 2026 11:54:11 +0800
+
 gst-plugins-good1.0 (1.24.10-1) unstable; urgency=medium
 
   * New upstream version 1.24.10

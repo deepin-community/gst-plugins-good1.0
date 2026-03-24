@@ -1,0 +1,80 @@
+From: Andoni Morales Alastruey <ylatuya@gmail.com>
+Date: Fri, 3 Oct 2025 10:40:57 +0200
+Subject: qtdemux: fix open/seek perf for GoPro files with SOS track
+
+Older GoPro adds an SOS track using the `fdsc` FOURCC that seems to be
+used for file recovery. This track contains high-frequency samples with
+timestamp 0 that are parsed and pushed by the demuxer when opening the
+file or doing non-accurate seeks, slowing down considerably the process
+(up to 3 seconds delay with an M1 in an 11-minute file).
+
+Ignore this stream in qtdemux so that it's not parsed or exposed. This
+information is hardly useful/usable for GStreamer applications.
+
+Fix #4679
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9833>
+---
+ gst/isomp4/fourcc.h  |  1 +
+ gst/isomp4/qtdemux.c | 15 ++++++++++++++-
+ 2 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/gst/isomp4/fourcc.h b/gst/isomp4/fourcc.h
+index 0865a18..7f2e9b2 100644
+--- a/gst/isomp4/fourcc.h
++++ b/gst/isomp4/fourcc.h
+@@ -152,6 +152,7 @@ G_BEGIN_DECLS
+ #define FOURCC_elst     GST_MAKE_FOURCC('e','l','s','t')
+ #define FOURCC_enda     GST_MAKE_FOURCC('e','n','d','a')
+ #define FOURCC_esds     GST_MAKE_FOURCC('e','s','d','s')
++#define FOURCC_fdsc     GST_MAKE_FOURCC('f','d','s','c')
+ #define FOURCC_fmp4     GST_MAKE_FOURCC('f','m','p','4')
+ #define FOURCC_free     GST_MAKE_FOURCC('f','r','e','e')
+ #define FOURCC_frma     GST_MAKE_FOURCC('f','r','m','a')
+diff --git a/gst/isomp4/qtdemux.c b/gst/isomp4/qtdemux.c
+index 059624d..8b55581 100644
+--- a/gst/isomp4/qtdemux.c
++++ b/gst/isomp4/qtdemux.c
+@@ -11856,6 +11856,7 @@ qtdemux_parse_trak (GstQTDemux * qtdemux, GNode * trak, guint32 * mvhd_matrix)
+   guint value_size, stsd_len, len;
+   guint32 track_id;
+   guint32 dummy;
++  guint32 fourcc;
+ 
+   GST_DEBUG_OBJECT (qtdemux, "parse_trak");
+ 
+@@ -12052,7 +12053,6 @@ qtdemux_parse_trak (GstQTDemux * qtdemux, GNode * trak, guint32 * mvhd_matrix)
+   stsd_entry_data = stsd_data + 16;
+   remaining_stsd_len = stsd_len - 16;
+   for (stsd_index = 0; stsd_index < stsd_entry_count; stsd_index++) {
+-    guint32 fourcc;
+     gchar *codec = NULL;
+     QtDemuxStreamStsdEntry *entry = &stream->stsd_entries[stsd_index];
+ 
+@@ -14139,6 +14139,12 @@ qtdemux_parse_trak (GstQTDemux * qtdemux, GNode * trak, guint32 * mvhd_matrix)
+           "type %" GST_FOURCC_FORMAT " caps %" GST_PTR_FORMAT,
+           GST_FOURCC_ARGS (fourcc), entry->caps);
+     } else if (stream->subtype == FOURCC_meta) {
++      if (fourcc == FOURCC_fdsc) {
++        // GoPro SOS track with file recovery data, ignore this stream
++        // See: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4679
++        goto ignored_stream;
++      }
++
+       entry->sampled = TRUE;
+       entry->sparse = TRUE;
+ 
+@@ -14324,6 +14330,13 @@ unknown_stream:
+     gst_qtdemux_stream_unref (stream);
+     return TRUE;
+   }
++ignored_stream:
++  {
++    GST_INFO_OBJECT (qtdemux, "ignored stream type %" GST_FOURCC_FORMAT,
++        GST_FOURCC_ARGS (fourcc));
++    gst_qtdemux_stream_unref (stream);
++    return TRUE;
++  }
+ }
+ 
+ /* If we can estimate the overall bitrate, and don't have information about the
