@@ -1,3 +1,10 @@
+gst-plugins-good1.0 (1.24.13-0deepin3) unstable; urgency=medium
+
+  * Fix CVE-2026-46470: divide by zero in qtdemux_audio_caps
+    (gstreamer MR !11243)
+
+ -- deepin-ci-robot <packages@deepin.org>  Thu, 04 Jun 2026 09:00:00 +0800
+
 gst-plugins-good1.0 (1.24.13-0deepin2) unstable; urgency=medium
 
   * Fix CVE-2026-46469: divide by zero in qtdemux_parse_trak
