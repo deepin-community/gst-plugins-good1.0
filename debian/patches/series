@@ -16,3 +16,4 @@
 0015-rtpqdm2depay-error-out-if-anyone-tries-to-use-this-e.patch
 0016-CVE-2026-46469-qtdemux-Avoid-division-by-zero-when.patch
 0017-CVE-2026-46470-qtdemux-Avoid-division-by-zero-in-a.patch
+0018-CVE-2026-39044-wavparse-fix-integer-overflow-in-cue.patch
