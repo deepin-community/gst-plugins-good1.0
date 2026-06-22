@@ -14,9 +14,9 @@ Build-Depends: debhelper,
                xauth,
                libgirepository1.0-dev,
                libglib2.0-dev (>= 2.62),
-               libgstreamer1.0-dev (>= 1.24.0),
-               libgstreamer-plugins-base1.0-dev (>= 1.24.0),
-               gstreamer1.0-plugins-base (>= 1.24.0),
+               libgstreamer1.0-dev (>= 1.26.0),
+               libgstreamer-plugins-base1.0-dev (>= 1.26.0),
+               gstreamer1.0-plugins-base (>= 1.26.0),
                liborc-0.4-dev (>= 1:0.4.17),
                libcairo2-dev (>= 1.10.0),
                libcaca-dev,
@@ -45,16 +45,16 @@ Build-Depends: debhelper,
                libtwolame-dev (>= 0.3.10),
                libopencore-amrnb-dev,
                libopencore-amrwb-dev,
-               qtbase5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
-               qtbase5-private-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
-               qtdeclarative5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
-               qttools5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
-               qt6-base-private-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
-               qt6-declarative-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
-               qt6-shader-baker [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x powerpc ppc64 sparc64],
-               qt6-tools-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
+               qtbase5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qtbase5-private-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qtdeclarative5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qttools5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qt6-base-private-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qt6-declarative-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qt6-shader-baker [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
+               qt6-tools-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
                qt6-wayland-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x powerpc ppc64 sparc64],
-               libqt5x11extras5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64],
+               libqt5x11extras5-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64],
                libqt5waylandclient5-dev [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x powerpc ppc64 sparc64],
                libraw1394-dev (>= 2.0.0) [linux-any],
                libiec61883-dev (>= 1.0.0) [linux-any],
@@ -71,7 +71,7 @@ Package: gstreamer1.0-pulseaudio
 Architecture: any
 Multi-Arch: same
 Section: oldlibs
-Depends: gstreamer1.0-plugins-good (>= 1.24.0), ${misc:Depends}
+Depends: gstreamer1.0-plugins-good (>= 1.26.0), ${misc:Depends}
 Description: GStreamer plugin for PulseAudio (transitional package)
  GStreamer is a streaming media framework, based on graphs of filters
  which operate on media data.  Applications using this library can do
@@ -86,7 +86,7 @@ Description: GStreamer plugin for PulseAudio (transitional package)
  This is a transitional package.
 
 Package: gstreamer1.0-qt5
-Architecture: amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64
+Architecture: amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64
 Multi-Arch: same
 Section: graphics
 Depends: ${misc:Depends},
@@ -111,7 +111,7 @@ Description: GStreamer plugin for Qt5
  This package contains the GStreamer plugin for Qt5.
 
 Package: gstreamer1.0-qt6
-Architecture: amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-i386 powerpc ppc64 sparc64
+Architecture: amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x hurd-amd64 hurd-i386 powerpc ppc64 sparc64
 Multi-Arch: same
 Section: graphics
 Depends: ${misc:Depends},
@@ -164,7 +164,7 @@ Multi-Arch: same
 Depends: ${misc:Depends},
          ${shlibs:Depends},
          gstreamer1.0-audiosink,
-         gstreamer1.0-plugins-base (>= 1.24.0),
+         gstreamer1.0-plugins-base (>= 1.26.0),
          libsoup-3.0-0
 Recommends: gstreamer1.0-x
 Replaces: gstreamer1.0-plugins-bad (<< 1.15.1),
@@ -173,6 +173,8 @@ Replaces: gstreamer1.0-plugins-bad (<< 1.15.1),
 Breaks: gstreamer1.0-plugins-bad (<< 1.15.1),
         gstreamer1.0-plugins-ugly (<< 1.24),
         gstreamer1.0-pulseaudio (<< 1.18.0),
+        libv4l-0 (<< 1.26.1-4~),
+        libv4lconvert0 (<< 1.26.1-4~)
 XB-GStreamer-Version: ${gstreamer:Version}
 XB-GStreamer-Elements: ${gstreamer:Elements}
 XB-GStreamer-URI-Sources: ${gstreamer:URISources}

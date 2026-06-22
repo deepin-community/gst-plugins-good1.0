@@ -4573,7 +4573,7 @@ init:
         G_GINT64_FORMAT " (%" GST_TIME_FORMAT ") of %" G_GINT64_FORMAT " (%"
         GST_STIME_FORMAT ")", first_qt_dts, GST_TIME_ARGS (first_dts), dts,
         GST_TIME_ARGS (current_dts), dts - first_qt_dts,
-        GST_STIME_ARGS (current_dts - first_dts));
+        GST_STIME_ARGS ((GstClockTimeDiff) (current_dts - first_dts)));
     atom_traf_set_base_decode_time (pad->traf, dts - first_qt_dts);
   }
 
@@ -5786,20 +5786,19 @@ gst_qt_mux_aggregate (GstAggregator * agg, gboolean timeout)
 }
 
 static gboolean
-field_is_in (GQuark field_id, const gchar * fieldname, ...)
+field_is_in (const GstIdStr * fieldname, const gchar * name, ...)
 {
   va_list varargs;
-  gchar *name = (gchar *) fieldname;
 
-  va_start (varargs, fieldname);
+  va_start (varargs, name);
   while (name) {
-    if (field_id == g_quark_from_static_string (name)) {
+    if (gst_id_str_is_equal_to_str (fieldname, name)) {
       va_end (varargs);
 
       return TRUE;
     }
 
-    name = va_arg (varargs, char *);
+    name = va_arg (varargs, const char *);
   }
   va_end (varargs);
 
@@ -5807,25 +5806,27 @@ field_is_in (GQuark field_id, const gchar * fieldname, ...)
 }
 
 static gboolean
-check_field (GQuark field_id, const GValue * value, gpointer user_data)
+check_field (const GstIdStr * fieldname, const GValue * value,
+    gpointer user_data)
 {
   GstStructure *structure = (GstStructure *) user_data;
-  const GValue *other = gst_structure_id_get_value (structure, field_id);
+  const GValue *other = gst_structure_id_str_get_value (structure, fieldname);
   const gchar *name = gst_structure_get_name (structure);
 
   if (g_str_has_prefix (name, "video/")) {
     /* ignore framerate with video caps */
-    if (g_strcmp0 (g_quark_to_string (field_id), "framerate") == 0)
+    if (gst_id_str_is_equal_to_str (fieldname, "framerate"))
       return TRUE;
   }
 
   if (g_strcmp0 (name, "video/x-h264") == 0 ||
-      g_strcmp0 (name, "video/x-h265") == 0) {
+      g_strcmp0 (name, "video/x-h265") == 0 ||
+      g_strcmp0 (name, "video/x-h266") == 0) {
     /* We support muxing multiple codec_data structures, and the new SPS
      * will contain updated tier / level / profiles, which means we do
      * not need to fail renegotiation when those change.
      */
-    if (field_is_in (field_id,
+    if (field_is_in (fieldname,
             "codec_data", "tier", "level", "profile",
             "chroma-site", "chroma-format", "bit-depth-luma", "colorimetry",
             /* TODO: this may require a separate track but gst, vlc, ffmpeg and
@@ -5837,7 +5838,7 @@ check_field (GQuark field_id, const GValue * value, gpointer user_data)
   }
 
   if (other == NULL) {
-    if (field_is_in (field_id, "interlace-mode", NULL) &&
+    if (field_is_in (fieldname, "interlace-mode", NULL) &&
         !g_strcmp0 (g_value_get_string (value), "progressive")) {
       return TRUE;
     }
@@ -5857,7 +5858,7 @@ gst_qtmux_caps_is_subset_full (GstQTMux * qtmux, GstCaps * subset,
   if (!gst_structure_has_name (sup_s, gst_structure_get_name (sub_s)))
     return FALSE;
 
-  return gst_structure_foreach (sub_s, check_field, sup_s);
+  return gst_structure_foreach_id_str (sub_s, check_field, sup_s);
 }
 
 /* will unref @qtmux */
@@ -6465,6 +6466,28 @@ gst_qt_mux_video_sink_set_caps (GstQTMuxPad * qtpad, GstCaps * caps)
       ext_atom_list = g_list_prepend (ext_atom_list, ext_atom);
 
     ext_atom = build_codec_data_extension (FOURCC_hvcC, codec_data);
+    if (ext_atom != NULL)
+      ext_atom_list = g_list_prepend (ext_atom_list, ext_atom);
+
+  } else if (strcmp (mimetype, "video/x-h266") == 0) {
+    const gchar *format;
+
+    if (!codec_data) {
+      GST_WARNING_OBJECT (qtmux, "no codec_data in h266 caps");
+      goto refuse_caps;
+    }
+
+    format = gst_structure_get_string (structure, "stream-format");
+    if (strcmp (format, "vvc1") == 0)
+      entry.fourcc = FOURCC_vvc1;
+    else if (strcmp (format, "vvi1") == 0)
+      entry.fourcc = FOURCC_vvi1;
+
+    ext_atom = build_btrt_extension (0, qtpad->avg_bitrate, qtpad->max_bitrate);
+    if (ext_atom != NULL)
+      ext_atom_list = g_list_prepend (ext_atom_list, ext_atom);
+
+    ext_atom = build_vvcC_extension (0, 0, codec_data);
     if (ext_atom != NULL)
       ext_atom_list = g_list_prepend (ext_atom_list, ext_atom);
 
