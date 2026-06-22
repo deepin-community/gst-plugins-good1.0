@@ -369,8 +369,7 @@ gst_y4m_encode_handle_frame (GstVideoEncoder * encoder,
   if (gst_y4m_encode_buffer_has_padding (filter, frame->input_buffer)) {
     outbuf = gst_y4m_encode_copy_buffer (filter, frame->input_buffer);
     if (!outbuf) {
-      gst_clear_buffer (&frame->output_buffer);
-      gst_video_encoder_finish_frame (encoder, frame);
+      gst_video_encoder_drop_frame (encoder, frame);
       return GST_FLOW_ERROR;
     }
   } else {

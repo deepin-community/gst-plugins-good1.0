@@ -1278,7 +1278,7 @@ gst_interleave_collected (GstCollectPads * pads, GstInterleave * self)
             segment.stop *= width;
           if (segment.position != -1)
             segment.position *= width;
-          /* fallthrough for the samples case */
+          /* FALLTHROUGH */
         case GST_FORMAT_DEFAULT:
           segment.start =
               gst_util_uint64_scale_int (segment.start, GST_SECOND, self->rate);
