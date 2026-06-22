@@ -1,3 +1,10 @@
+gst-plugins-good1.0 (1.24.13-0deepin4) unstable; urgency=medium
+
+  * Fix CVE-2026-39044: integer overflow in WAV parser cue chunk parsing
+    (gstreamer MR !11247)
+
+ -- deepin-ci-robot <packages@deepin.org>  Thu, 18 Jun 2026 02:30:00 +0800
+
 gst-plugins-good1.0 (1.24.13-0deepin3) unstable; urgency=medium
 
   * Fix CVE-2026-46470: divide by zero in qtdemux_audio_caps
