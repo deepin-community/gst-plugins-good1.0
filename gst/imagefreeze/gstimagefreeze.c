@@ -89,11 +89,13 @@ static gboolean gst_image_freeze_src_query (GstPad * pad, GstObject * parent,
 static GstStaticPadTemplate sink_pad_template = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-raw(ANY); video/x-bayer(ANY)"));
+    GST_STATIC_CAPS
+    ("video/x-raw(ANY); video/x-bayer(ANY); image/jpeg(ANY); image/png(ANY)"));
 
 static GstStaticPadTemplate src_pad_template =
     GST_STATIC_PAD_TEMPLATE ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-raw(ANY); video/x-bayer(ANY)"));
+    GST_STATIC_CAPS
+    ("video/x-raw(ANY); video/x-bayer(ANY); image/jpeg(ANY); image/png(ANY)"));
 
 GST_DEBUG_CATEGORY_STATIC (gst_image_freeze_debug);
 #define GST_CAT_DEFAULT gst_image_freeze_debug
@@ -639,8 +641,15 @@ gst_image_freeze_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
       /* fall-through */
     case GST_EVENT_SEGMENT:
       GST_DEBUG_OBJECT (pad, "Dropping event");
+      self->seqnum = GST_EVENT_SEQNUM (event);
       gst_event_unref (event);
       ret = TRUE;
+      break;
+    case GST_EVENT_FLUSH_STOP:
+      g_mutex_lock (&self->lock);
+      self->flushing = FALSE;
+      g_mutex_unlock (&self->lock);
+      ret = gst_pad_push_event (self->srcpad, event);
       break;
     case GST_EVENT_FLUSH_START:
       gst_image_freeze_reset (self);
