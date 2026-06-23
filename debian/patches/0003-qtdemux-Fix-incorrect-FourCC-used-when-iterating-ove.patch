@@ -1,0 +1,30 @@
+From: Enock Gomes Neto <enocknt@gmail.com>
+Date: Tue, 1 Jul 2025 12:37:25 -0300
+Subject: qtdemux: Fix incorrect FourCC used when iterating over sbgp atoms
+
+In qtdemux_parse_traf(), the loop over sbgp atoms used FOURCC_sgpd instead
+of FOURCC_sbgp when retrieving the next sibling node. This caused the loop
+to either terminate early or attempt to parse sgpd atoms as sbgp, leading
+to incorrect or incomplete seig group associations.
+
+This fix ensures that all sbgp atoms are properly parsed in sequence.
+
+Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4511
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9388>
+---
+ gst/isomp4/qtdemux.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gst/isomp4/qtdemux.c b/gst/isomp4/qtdemux.c
+index 8e7eb89..059624d 100644
+--- a/gst/isomp4/qtdemux.c
++++ b/gst/isomp4/qtdemux.c
+@@ -4493,7 +4493,7 @@ qtdemux_parse_moof (GstQTDemux * qtdemux, const guint8 * buffer, guint length,
+             break;
+           }
+           sbgp_node = qtdemux_tree_get_sibling_by_type_full (sbgp_node,
+-              FOURCC_sgpd, &sbgp_data);
++              FOURCC_sbgp, &sbgp_data);
+         }
+       }
+     }
