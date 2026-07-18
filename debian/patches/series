@@ -1,2 +1,3 @@
 0000_remove-flv-test.patch
 0018-CVE-2026-53705-wavpackdec-Fix-integer-overflow-in-buf.patch
+CVE-2026-39044.patch
