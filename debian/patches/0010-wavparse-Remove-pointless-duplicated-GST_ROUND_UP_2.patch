@@ -1,0 +1,29 @@
+From: =?utf-8?q?Sebastian_Dr=C3=B6ge?= <sebastian@centricular.com>
+Date: Mon, 12 Jan 2026 13:21:48 +0200
+Subject: wavparse: Remove pointless duplicated GST_ROUND_UP_2()
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10947>
+---
+ gst/wavparse/gstwavparse.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/gst/wavparse/gstwavparse.c b/gst/wavparse/gstwavparse.c
+index 5adccff..8a6df75 100644
+--- a/gst/wavparse/gstwavparse.c
++++ b/gst/wavparse/gstwavparse.c
+@@ -1665,7 +1665,6 @@ gst_wavparse_stream_headers (GstWavParse * wav)
+         } else {
+           gst_buffer_unref (buf);
+         }
+-        size = GST_ROUND_UP_2 (size);
+         wav->offset += size;
+         break;
+       }
+@@ -1711,7 +1710,6 @@ gst_wavparse_stream_headers (GstWavParse * wav)
+         } else {
+           gst_buffer_unref (buf);
+         }
+-        size = GST_ROUND_UP_2 (size);
+         wav->offset += size;
+         break;
+       }

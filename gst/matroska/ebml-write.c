@@ -52,7 +52,7 @@ gst_ebml_write_class_init (GstEbmlWriteClass * klass)
 static void
 gst_ebml_write_init (GstEbmlWrite * ebml)
 {
-  ebml->agg = NULL;
+  ebml->srcpad = NULL;
   ebml->pos = 0;
   ebml->last_pos = G_MAXUINT64; /* force segment event */
 
@@ -68,7 +68,7 @@ gst_ebml_write_finalize (GObject * object)
 {
   GstEbmlWrite *ebml = GST_EBML_WRITE (object);
 
-  ebml->agg = NULL;
+  gst_object_unref (ebml->srcpad);
 
   if (ebml->cache) {
     gst_byte_writer_free (ebml->cache);
@@ -98,12 +98,12 @@ gst_ebml_write_finalize (GObject * object)
  * Returns: a new #GstEbmlWrite
  */
 GstEbmlWrite *
-gst_ebml_write_new (GstAggregator * agg)
+gst_ebml_write_new (GstPad * srcpad)
 {
   GstEbmlWrite *ebml =
       GST_EBML_WRITE (g_object_new (GST_TYPE_EBML_WRITE, NULL));
 
-  ebml->agg = agg;
+  ebml->srcpad = gst_object_ref (srcpad);
   ebml->timestamp = GST_CLOCK_TIME_NONE;
 
   gst_ebml_write_reset (ebml);
@@ -207,10 +207,11 @@ gst_ebml_write_set_cache (GstEbmlWrite * ebml, guint size)
   ebml->cache_pos = ebml->pos;
 }
 
-static void
+static gboolean
 gst_ebml_writer_send_segment_event (GstEbmlWrite * ebml, guint64 new_pos)
 {
   GstSegment segment;
+  gboolean res;
 
   GST_INFO ("seeking to %" G_GUINT64_FORMAT, new_pos);
 
@@ -220,7 +221,12 @@ gst_ebml_writer_send_segment_event (GstEbmlWrite * ebml, guint64 new_pos)
   segment.stop = -1;
   segment.position = 0;
 
-  gst_aggregator_update_segment (ebml->agg, &segment);
+  res = gst_pad_push_event (ebml->srcpad, gst_event_new_segment (&segment));
+
+  if (!res)
+    GST_WARNING ("seek to %" G_GUINT64_FORMAT "failed", new_pos);
+
+  return res;
 }
 
 /**
@@ -262,7 +268,7 @@ gst_ebml_write_flush_cache (GstEbmlWrite * ebml, gboolean is_keyframe,
       GST_BUFFER_FLAG_SET (buffer, GST_BUFFER_FLAG_DELTA_UNIT);
     }
     ebml->last_pos = ebml->pos;
-    ebml->last_write_result = gst_aggregator_finish_buffer (ebml->agg, buffer);
+    ebml->last_write_result = gst_pad_push (ebml->srcpad, buffer);
   } else {
     gst_buffer_unref (buffer);
   }
@@ -468,7 +474,7 @@ gst_ebml_write_element_push (GstEbmlWrite * ebml, GstBuffer * buf,
       GST_BUFFER_FLAG_UNSET (buf, GST_BUFFER_FLAG_DISCONT);
     }
     ebml->last_pos = ebml->pos;
-    ebml->last_write_result = gst_aggregator_finish_buffer (ebml->agg, buf);
+    ebml->last_write_result = gst_pad_push (ebml->srcpad, buf);
   } else {
     gst_buffer_unref (buf);
   }

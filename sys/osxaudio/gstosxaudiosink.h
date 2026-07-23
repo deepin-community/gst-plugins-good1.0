@@ -82,16 +82,11 @@ struct _GstOsxAudioSink
   GstAudioBaseSink sink;
 
   AudioDeviceID device_id;
-  const char *unique_id;
 
   AudioUnit audiounit;
   double volume;
 
   guint channels;
-
-#ifdef HAVE_IOS
-  gboolean configure_session;
-#endif
 };
 
 struct _GstOsxAudioSinkClass

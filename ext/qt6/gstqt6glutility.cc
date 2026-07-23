@@ -102,18 +102,12 @@ gst_qml6_get_gl_display (gboolean sink)
   if (QString::fromUtf8 ("wayland") == app->platformName()
         || QString::fromUtf8 ("wayland-egl") == app->platformName()){
     struct wl_display * wayland_display;
-    GstGLDisplayEGL *display_egl;
     QPlatformNativeInterface *native =
         QGuiApplication::platformNativeInterface();
     wayland_display = (struct wl_display *)
         native->nativeResourceForWindow("display", NULL);
     display = (GstGLDisplay *)
         gst_gl_display_wayland_new_with_display (wayland_display);
-
-    display_egl = gst_gl_display_egl_from_gl_display (display);
-    if (display_egl)
-      gst_gl_display_egl_set_foreign (display_egl, TRUE);
-    gst_clear_object (&display_egl);
   }
 #endif
 #if GST_GL_HAVE_PLATFORM_EGL && GST_GL_HAVE_WINDOW_ANDROID
@@ -150,11 +144,8 @@ gst_qml6_get_gl_display (gboolean sink)
         QGuiApplication::platformNativeInterface();
     EGLDisplay egl_display = (EGLDisplay)
         native->nativeResourceForWindow("egldisplay", NULL);
-    if (egl_display != EGL_NO_DISPLAY) {
-      GstGLDisplayEGL *display_egl = gst_gl_display_egl_new_with_egl_display (egl_display);
-      gst_gl_display_egl_set_foreign (display_egl, TRUE);
-      display = (GstGLDisplay *) display_egl;
-    }
+    if (egl_display != EGL_NO_DISPLAY)
+      display = (GstGLDisplay *) gst_gl_display_egl_new_with_egl_display (egl_display);
 #else
     EGLDisplay egl_display = (EGLDisplay) gst_gl_display_egl_get_from_native (GST_GL_DISPLAY_TYPE_ANY, 0);
     display = (GstGLDisplay *) gst_gl_display_egl_new_with_egl_display (egl_display);
@@ -301,7 +292,7 @@ gst_qml6_get_gl_wrapcontext (GstGLDisplay * display,
 }
 
 QOpenGLContext *
-qt6_opengl_native_context_from_gst_gl_context (GstGLContext * context)
+qt_opengl_native_context_from_gst_gl_context (GstGLContext * context)
 {
   guintptr handle;
   GstGLPlatform platform;
@@ -379,7 +370,7 @@ qt6_opengl_native_context_from_gst_gl_context (GstGLContext * context)
         "1. Qt6 wasn't built with support for \'%s\'\n"
         "2. The qmlgl plugin was built without support for your platform.\n"
         "3. The necessary code to convert from a GstGLContext to Qt's "
-        "native context type for \'%s\' currently does not exist.\n"
+        "native context type for \'%s\' currently does not exist."
         "4. Qt failed to wrap an existing native context.",
         platform_s, platform_s);
     g_free (platform_s);

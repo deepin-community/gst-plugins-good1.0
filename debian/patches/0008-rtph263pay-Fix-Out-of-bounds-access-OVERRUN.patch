@@ -1,0 +1,42 @@
+From: Jeehyun Lee <jeehyun.lee@lge.com>
+Date: Tue, 28 Oct 2025 18:09:28 +0900
+Subject: rtph263pay: Fix Out-of-bounds access (OVERRUN)
+
+Calling gst_rtp_h263_pay_B_fragment_push with gob->macroblocks
+and mb - 1U is suspicious because of the very large index,4294967295.
+The index may be due to a negative parameter being interpreted
+as unsigned.
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9997>
+---
+ gst/rtp/gstrtph263pay.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/gst/rtp/gstrtph263pay.c b/gst/rtp/gstrtph263pay.c
+index f89843a..8ba4677 100644
+--- a/gst/rtp/gstrtph263pay.c
++++ b/gst/rtp/gstrtph263pay.c
+@@ -1593,7 +1593,11 @@ gst_rtp_h263_pay_mode_B_fragment (GstRtpH263Pay * rtph263pay,
+       //GST_DEBUG_OBJECT (rtph263pay, "Pushing GOBS %d to %d because payload size is %d", first,
+       //    first == mb - 1, payload_len);
+ 
+-      // FIXME: segfault if mb == 0 (first MB is larger than max_payload_size)
++      if (mb == 0) {
++        GST_ERROR_OBJECT (rtph263pay,
++            "first MB is larger than max_payload_size");
++        goto decode_error;
++      }
+       GST_DEBUG_OBJECT (rtph263pay, "Push B mode fragment from mb %d to %d",
+           first, mb - 1);
+       if (gst_rtp_h263_pay_B_fragment_push (rtph263pay, context, gob, first,
+@@ -1614,6 +1618,10 @@ gst_rtp_h263_pay_mode_B_fragment (GstRtpH263Pay * rtph263pay,
+   /* Push rest */
+   GST_DEBUG_OBJECT (rtph263pay, "Remainder first: %d, MB: %d", first, mb);
+   if (payload_len != 0) {
++    if (mb == 0) {
++      GST_ERROR_OBJECT (rtph263pay, "first MB is larger than max_payload_size");
++      goto decode_error;
++    }
+     GST_DEBUG_OBJECT (rtph263pay, "Push B mode fragment from mb %d to %d",
+         first, mb - 1);
+     if (gst_rtp_h263_pay_B_fragment_push (rtph263pay, context, gob, first,

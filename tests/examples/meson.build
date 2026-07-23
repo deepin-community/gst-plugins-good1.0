@@ -14,7 +14,6 @@ subdir('shapewipe')
 if have_v4l2
   subdir('v4l2')
 endif
-subdir('splitmux')
 
 if gtk_dep.found()
   subdir('equalizer')

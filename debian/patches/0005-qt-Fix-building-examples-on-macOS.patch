@@ -1,0 +1,36 @@
+From: Nirbheek Chauhan <nirbheek@centricular.com>
+Date: Mon, 29 Sep 2025 16:11:30 +0530
+Subject: qt: Fix building examples on macOS
+
+GL/gl.h is an incorrect include on macOS, and the correct include is
+already done by gstgl.
+
+qt_current_nsopengl_context() wasn't being exported, leading to build
+failures
+
+Also add comments to gstqtglutility.cc to clarify dense #ifdef usage.
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9826>
+---
+ ext/qt/gstqtglutility.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ext/qt/gstqtglutility.cc b/ext/qt/gstqtglutility.cc
+index a9d2f38..1476df8 100644
+--- a/ext/qt/gstqtglutility.cc
++++ b/ext/qt/gstqtglutility.cc
+@@ -333,12 +333,12 @@ qt_opengl_native_context_from_gst_gl_context (GstGLContext * context)
+                 egl_display = (EGLDisplay) gst_gl_display_get_handle ((GstGLDisplay *) display_egl);
+ #endif
+         }
+-#endif
++#endif // GST_GL_HAVE_WINDOW_WAYLAND
+         gst_object_unref (display_egl);
+         gst_object_unref (display);
+         return QVariant::fromValue(QEGLNativeContext((EGLContext) handle, egl_display));
+     }
+-#endif
++#endif // GST_GL_HAVE_PLATFORM_EGL
+ #if GST_GL_HAVE_WINDOW_WIN32 && GST_GL_HAVE_PLATFORM_WGL && defined (HAVE_QT_WIN32)
+     if (platform == GST_GL_PLATFORM_WGL) {
+         GstGLWindow *window = gst_gl_context_get_window (context);

@@ -74,14 +74,11 @@ test_ebml_header_with_version (gint version,
   g_object_set (h->element, "version", version, NULL);
 
   inbuffer = gst_harness_create_buffer (h, 1);
-  GST_BUFFER_PTS (inbuffer) = 0;
   fail_unless_equals_int (GST_FLOW_OK, gst_harness_push (h, inbuffer));
+  fail_unless_equals_int (2, gst_harness_buffers_received (h));
 
   outbuffer = gst_harness_pull (h);
   compare_buffer_to_data (outbuffer, data, data_size);
-  gst_buffer_unref (outbuffer);
-
-  outbuffer = gst_harness_pull (h);
   gst_buffer_unref (outbuffer);
 
   gst_harness_teardown (h);
@@ -145,7 +142,6 @@ GST_START_TEST (test_vorbis_header)
   h = setup_matroskamux_harness (VORBIS_TMPL_CAPS_STRING);
 
   inbuffer = gst_harness_create_buffer (h, 1);
-  GST_BUFFER_PTS (inbuffer) = 0;
   fail_unless_equals_int (GST_FLOW_OK, gst_harness_push (h, inbuffer));
 
   outbuffer = gst_harness_pull (h);
@@ -164,10 +160,7 @@ GST_START_TEST (test_vorbis_header)
     ASSERT_BUFFER_REFCOUNT (outbuffer, "outbuffer", 1);
     gst_buffer_unref (outbuffer);
 
-    if (vorbis_header_found)
-      break;
-
-    outbuffer = gst_harness_pull (h);
+    outbuffer = gst_harness_try_pull (h);
   }
 
   fail_unless (vorbis_header_found);
@@ -193,11 +186,13 @@ test_block_group_with_version (gint version,
   inbuffer = gst_harness_create_buffer (h, 1);
   GST_BUFFER_TIMESTAMP (inbuffer) = 0;
   fail_unless_equals_int (GST_FLOW_OK, gst_harness_push (h, inbuffer));
+  fail_unless_equals_int (5, gst_harness_buffers_received (h));
 
-  for (int i = 0; i < 5; i++) {
-    outbuffer = gst_harness_pull (h);
-    fail_unless (outbuffer != NULL);
+  outbuffer = gst_harness_pull (h);
+  fail_unless (outbuffer != NULL);
+  while (outbuffer != NULL) {
     gst_buffer_unref (outbuffer);
+    outbuffer = gst_harness_try_pull (h);
   }
 
   /* Now push a buffer */
@@ -250,11 +245,13 @@ GST_START_TEST (test_reset)
   inbuffer = gst_harness_create_buffer (h, 1);
   GST_BUFFER_TIMESTAMP (inbuffer) = 0;
   fail_unless_equals_int (GST_FLOW_OK, gst_harness_push (h, inbuffer));
+  fail_unless_equals_int (5, gst_harness_buffers_received (h));
 
-  for (int i = 0; i < 5; i++) {
-    outbuffer = gst_harness_pull (h);
-    fail_unless (outbuffer != NULL);
+  outbuffer = gst_harness_pull (h);
+  fail_unless (outbuffer != NULL);
+  while (outbuffer != NULL) {
     gst_buffer_unref (outbuffer);
+    outbuffer = gst_harness_try_pull (h);
   }
 
   fail_unless_equals_int (GST_STATE_CHANGE_SUCCESS,
@@ -265,13 +262,12 @@ GST_START_TEST (test_reset)
   inbuffer = gst_harness_create_buffer (h, 1);
   GST_BUFFER_TIMESTAMP (inbuffer) = 0;
   fail_unless_equals_int (GST_FLOW_OK, gst_harness_push (h, inbuffer));
-  gst_harness_push_event (h, gst_event_new_eos ());
 
   outbuffer = gst_harness_pull (h);
   fail_unless (outbuffer != NULL);
   while (outbuffer != NULL) {
     gst_buffer_unref (outbuffer);
-    fail_unless (gst_harness_pull_until_eos (h, &outbuffer));
+    outbuffer = gst_harness_try_pull (h);
   }
 
   gst_harness_teardown (h);
@@ -944,6 +940,7 @@ test_toc (gboolean with_edition)
 
   /* send eos to ensure everything is written */
   fail_unless (gst_harness_push_event (h, gst_event_new_eos ()));
+  ASSERT_MINI_OBJECT_REFCOUNT (test_toc, "test_toc", 1);
 
   outbuffer = gst_harness_pull (h);
   fail_unless (outbuffer != NULL);
@@ -961,7 +958,7 @@ test_toc (gboolean with_edition)
     }
 
     gst_buffer_unref (outbuffer);
-    fail_unless (gst_harness_pull_until_eos (h, &outbuffer));
+    outbuffer = gst_harness_try_pull (h);
   }
 
   fail_unless (gst_buffer_map (merged_buffer, &info, GST_MAP_READ));
