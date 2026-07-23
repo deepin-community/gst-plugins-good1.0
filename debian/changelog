@@ -4,13 +4,6 @@ gst-plugins-good1.0 (1.26.2-1deepin2) unstable; urgency=medium
 
  -- deepin-ci-robot <packages@deepin.org>  Sun, 19 Jul 2026 07:05:17 +0800
 
-gst-plugins-good1.0 (1.26.2-1deepin1) unstable; urgency=medium
-
-  * Fix CVE-2026-53705: integer overflow in wavpack decoder buffer size
-    calculation (gstreamer MR !11797)
-
- -- deepin-ci-robot <packages@deepin.org>  Tue, 15 Jul 2026 10:00:00 +0800
-
 gst-plugins-good1.0 (1.26.2-1) unstable; urgency=medium
 
   * d/copyright: remove reference to ostal address of the Free Software Foundation (FSF).
