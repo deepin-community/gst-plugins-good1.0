@@ -88,7 +88,8 @@ gst_mpd_period_node_finalize (GObject * object)
 {
   GstMPDPeriodNode *self = GST_MPD_PERIOD_NODE (object);
 
-  g_free (self->id);
+  if (self->id)
+    xmlFree (self->id);
   gst_mpd_segment_base_node_free (self->SegmentBase);
   gst_mpd_segment_list_node_free (self->SegmentList);
   gst_mpd_segment_template_node_free (self->SegmentTemplate);

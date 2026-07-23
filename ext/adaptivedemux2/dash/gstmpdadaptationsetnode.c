@@ -77,7 +77,8 @@ gst_mpd_adaptation_set_node_finalize (GObject * object)
 
   if (self->lang)
     xmlFree (self->lang);
-  g_free (self->contentType);
+  if (self->contentType)
+    xmlFree (self->contentType);
   g_free (self->par);
   g_free (self->segmentAlignment);
   g_free (self->subsegmentAlignment);

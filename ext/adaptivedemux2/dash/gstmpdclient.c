@@ -1136,8 +1136,9 @@ gst_mpd_client2_fetch_external_periods (GstMPDClient2 * client,
 
   GstUri *base_uri, *uri;
   gchar *query = NULL;
-  gchar *uri_string;
+  gchar *uri_string, *wrapper;
   GList *new_periods = NULL;
+  const gchar *data;
 
   /* ISO/IEC 23009-1:2014 5.5.3 4)
    * Remove nodes that resolve to nothing when resolving
@@ -1187,31 +1188,32 @@ gst_mpd_client2_fetch_external_periods (GstMPDClient2 * client,
   download_request_unref (download);
 
   if (period_buffer) {
-    gsize alloc_size, buffer_size;
-    GString *data;
-
+    GstAdapter *adapter;
     /* external xml could have multiple period without root xmlNode.
      * To avoid xml parsing error caused by no root node, wrapping it with
      * custom root node */
+    adapter = gst_adapter_new ();
 
-    buffer_size = gst_buffer_get_size (period_buffer);
-    alloc_size =
-        buffer_size + sizeof (CUSTOM_WRAPPER_START) +
-        sizeof (CUSTOM_WRAPPER_END) - 2;
-    data = g_string_sized_new (alloc_size);
-    g_string_append_len (data, CUSTOM_WRAPPER_START,
-        sizeof (CUSTOM_WRAPPER_START) - 1);
+    wrapper = g_new (gchar, strlen (CUSTOM_WRAPPER_START));
+    memcpy (wrapper, CUSTOM_WRAPPER_START, strlen (CUSTOM_WRAPPER_START));
+    gst_adapter_push (adapter,
+        gst_buffer_new_wrapped (wrapper, strlen (CUSTOM_WRAPPER_START)));
 
-    gst_buffer_extract (period_buffer, 0, data->str + data->len, buffer_size);
-    gst_buffer_unref (period_buffer);
-    data->len += buffer_size;
+    gst_adapter_push (adapter, period_buffer);
 
-    g_string_append_len (data, CUSTOM_WRAPPER_END,
-        sizeof (CUSTOM_WRAPPER_END) - 1);
+    wrapper = g_strdup (CUSTOM_WRAPPER_END);
+    gst_adapter_push (adapter,
+        gst_buffer_new_wrapped (wrapper, strlen (CUSTOM_WRAPPER_END) + 1));
 
-    new_periods = gst_mpdparser_get_external_periods (data->str, alloc_size);
+    data = gst_adapter_map (adapter, gst_adapter_available (adapter));
 
-    g_string_free (data, TRUE);
+    new_periods =
+        gst_mpdparser_get_external_periods (data,
+        gst_adapter_available (adapter));
+
+    gst_adapter_unmap (adapter);
+    gst_adapter_clear (adapter);
+    gst_object_unref (adapter);
   }
 
   return new_periods;

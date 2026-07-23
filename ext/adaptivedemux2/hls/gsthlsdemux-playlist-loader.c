@@ -470,8 +470,7 @@ static void
 handle_download_error (GstHLSDemuxPlaylistLoader * pl,
     GstHLSDemuxPlaylistLoaderPrivate * priv)
 {
-  gint max_retries = gst_adaptive_demux_max_retries (priv->demux);
-  if (max_retries >= 0 && ++priv->download_error_count > max_retries) {
+  if (++priv->download_error_count > MAX_DOWNLOAD_ERROR_COUNT) {
     GST_DEBUG_OBJECT (pl,
         "Reached %d download failures on URI %s. Reporting the failure",
         priv->download_error_count, priv->loading_playlist_uri);
@@ -482,15 +481,8 @@ handle_download_error (GstHLSDemuxPlaylistLoader * pl,
   /* The error callback may have provided a new playlist to load, which
    * will have scheduled a state update immediately. In that case,
    * don't trigger our own delayed retry */
-  if (priv->pending_cb_id == 0) {
-    GstClockTime delay =
-        gst_adaptive_demux_retry_delay (priv->demux, priv->download_error_count,
-        100 * GST_MSECOND);
-    GST_DEBUG_OBJECT (pl,
-        "Scheduling delayed next playlist download in %" GST_TIMEP_FORMAT,
-        &delay);
-    schedule_next_playlist_load (pl, priv, delay);
-  }
+  if (priv->pending_cb_id == 0)
+    schedule_next_playlist_load (pl, priv, 100 * GST_MSECOND);
 }
 
 static void

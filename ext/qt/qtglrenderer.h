@@ -44,10 +44,11 @@ public:
     GstQuickRenderer();
     ~GstQuickRenderer();
 
-    /* initialize the GStreamer/Qt integration and determine wether to attach depth/stencil buffer to fbo. On failure
-     * returns false and fills @error. Must be called with @context not wrapped and current in the current thread
-     */
-    bool init (GstGLContext * context, const gboolean use_depth_buffer, GError ** error);
+    /* initialize the GStreamer/Qt integration.  On failure returns false
+     * and fills @error.
+     * Must be called with @context not wrapped and current in the current
+     * thread  */
+    bool init (GstGLContext * context, GError ** error);
 
     /* set the qml scene.  returns false and fills @error on failure */
     bool setQmlScene (const gchar * scene, GError ** error);
@@ -100,7 +101,7 @@ private:
     GstGLAllocationParams *gl_params;
     GstVideoInfo v_info;
     GstGLMemory *gl_mem;
-    gboolean m_useDepthBuffer;
+
     QString m_errorString;
     struct SharedRenderData *m_sharedRenderData;
 };

@@ -14,26 +14,6 @@ interlace_sources = [
   'yadif.c'
 ]
 
-interlace_headers = [
-  'tvtime-dist.h',
-  'gstdeinterlacemethod.h',
-  'yadif.h',
-  'gstdeinterlace.h',
-]
-
-doc_sources = []
-foreach s: interlace_sources + interlace_headers
-  doc_sources += meson.current_source_dir() / s
-endforeach
-
-plugin_sources += {
-  'deinterlace': pathsep.join(doc_sources)
-}
-
-if get_option('deinterlace').disabled()
-  subdir_done()
-endif
-
 orcsrc = 'tvtime'
 if have_orcc
   orc_h = custom_target(orcsrc + '.h',
@@ -117,3 +97,4 @@ gstdeinterlace = library('gstdeinterlace',
   install_dir : plugins_install_dir,
 )
 plugins += [gstdeinterlace]
+

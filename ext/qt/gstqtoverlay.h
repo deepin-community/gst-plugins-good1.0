@@ -51,8 +51,6 @@ struct _GstQtOverlay
   /* <private> */
   GstGLFilter           parent;
 
-  gboolean              depth_buffer;
-
   gchar                *qml_scene;
 
   GstQuickRenderer     *renderer;

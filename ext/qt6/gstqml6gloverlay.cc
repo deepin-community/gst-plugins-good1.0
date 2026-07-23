@@ -19,7 +19,7 @@
  */
 
 /**
- * SECTION:element-qml6gloverlay
+ * SECTION:gstqml6gloverlay
  *
  * `qml6gloverlay` provides a way to render an almost-arbitrary QML scene within
  * GStreamer pipeline using the same OpenGL context that GStreamer uses
@@ -73,8 +73,6 @@
  * The Qml scene will run at the pace of incoming buffers.  One input buffer
  * will cause a render of one output buffer.  The timestamps on the input
  * buffers are used to drive the animation time.
- *
- * Since: 1.24
  */
 
 #ifdef HAVE_CONFIG_H

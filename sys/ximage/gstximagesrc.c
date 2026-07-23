@@ -1092,7 +1092,6 @@ gst_ximage_src_finalize (GObject * object)
   if (src->xcontext)
     ximageutil_xcontext_clear (src->xcontext);
 
-  g_free (src->display_name);
   g_free (src->xname);
   g_mutex_clear (&src->pool_lock);
   g_mutex_clear (&src->x_lock);
@@ -1331,7 +1330,7 @@ gst_ximage_src_class_init (GstXImageSrcClass * klass)
   g_object_class_install_property (gc, PROP_STARTY,
       g_param_spec_uint ("starty", "Start Y co-ordinate",
           "Y coordinate of top left corner of area to be recorded (0 for top left of screen)",
-          0, G_MAXINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          0, G_MAXINT, 0, G_PARAM_READWRITE));
   /**
    * GstXImageSrc:endx:
    *
@@ -1341,7 +1340,7 @@ gst_ximage_src_class_init (GstXImageSrcClass * klass)
   g_object_class_install_property (gc, PROP_ENDX,
       g_param_spec_uint ("endx", "End X",
           "X coordinate of bottom right corner of area to be recorded (0 for bottom right of screen)",
-          0, G_MAXINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          0, G_MAXINT, 0, G_PARAM_READWRITE));
   /**
    * GstXImageSrc:endy:
    *
@@ -1351,7 +1350,7 @@ gst_ximage_src_class_init (GstXImageSrcClass * klass)
   g_object_class_install_property (gc, PROP_ENDY,
       g_param_spec_uint ("endy", "End Y",
           "Y coordinate of bottom right corner of area to be recorded (0 for bottom right of screen)",
-          0, G_MAXINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          0, G_MAXINT, 0, G_PARAM_READWRITE));
 
   /**
    * GstXImageSrc:remote:

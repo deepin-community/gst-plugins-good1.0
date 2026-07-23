@@ -29,8 +29,6 @@
 #include <unistd.h>
 #include <string.h>
 
-#include <gst/allocators/allocators.h>
-
 #include "gstv4l2object.h"
 #include "gstv4l2transform.h"
 
@@ -375,45 +373,23 @@ gst_v4l2_transform_caps_remove_format_info (GstCaps * caps)
 
   n = gst_caps_get_size (caps);
   for (i = 0; i < n; i++) {
-    GstCapsFeatures *alt_f = NULL;
-
-    st = gst_structure_copy (gst_caps_get_structure (caps, i));
+    st = gst_caps_get_structure (caps, i);
     f = gst_caps_get_features (caps, i);
-    alt_f = gst_caps_features_copy (f);
-
-    /* remove all the features we support, if anything is left it means we
-     * cannot convert */
-    if (!gst_caps_features_is_any (f)) {
-      gst_caps_features_remove (alt_f, GST_CAPS_FEATURE_MEMORY_SYSTEM_MEMORY);
-      gst_caps_features_remove (alt_f, GST_CAPS_FEATURE_MEMORY_DMABUF);
-      gst_caps_features_remove (alt_f, GST_CAPS_FEATURE_FORMAT_INTERLACED);
-    }
-
-    /* Only remove format info for the cases when we can actually convert */
-    if (!gst_caps_features_is_any (f)
-        && (gst_caps_features_get_size (alt_f) == 0)) {
-      gst_structure_remove_fields (st, "format", "drm-format", "colorimetry",
-          "chroma-site", "width", "height", "pixel-aspect-ratio", NULL);
-
-      /* create an alternate feature, so that we allow converting between system
-       * memory and dmabuf */
-      if (gst_caps_features_contains (f, GST_CAPS_FEATURE_FORMAT_INTERLACED))
-        gst_caps_features_add (alt_f, GST_CAPS_FEATURE_FORMAT_INTERLACED);
-      if (!gst_caps_features_contains (f, GST_CAPS_FEATURE_MEMORY_DMABUF))
-        gst_caps_features_add (alt_f, GST_CAPS_FEATURE_MEMORY_DMABUF);
-    }
 
     /* If this is already expressed by the existing caps
      * skip this structure */
-    if (!gst_caps_is_subset_structure_full (res, st, f))
-      gst_caps_append_structure_full (res, gst_structure_copy (st),
-          gst_caps_features_copy (f));
-    if (!gst_caps_is_subset_structure_full (res, st, alt_f))
-      gst_caps_append_structure_full (res, gst_structure_copy (st),
-          gst_caps_features_copy (alt_f));
+    if (i > 0 && gst_caps_is_subset_structure_full (res, st, f))
+      continue;
 
-    gst_structure_free (st);
-    gst_caps_features_free (alt_f);
+    st = gst_structure_copy (st);
+    /* Only remove format info for the cases when we can actually convert */
+    if (!gst_caps_features_is_any (f)
+        && gst_caps_features_is_equal (f,
+            GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY))
+      gst_structure_remove_fields (st, "format", "colorimetry", "chroma-site",
+          "width", "height", "pixel-aspect-ratio", NULL);
+
+    gst_caps_append_structure_full (res, st, gst_caps_features_copy (f));
   }
 
   return res;
@@ -944,7 +920,7 @@ gst_v4l2_transform_prepare_output_buffer (GstBaseTransform * trans,
     }
 
     gst_buffer_pool_config_set_params (config, self->incaps,
-        self->v4l2output->info.vinfo.size, min, min);
+        self->v4l2output->info.size, min, min);
 
     /* There is no reason to refuse this config */
     if (!gst_buffer_pool_set_config (pool, config))

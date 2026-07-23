@@ -19,7 +19,7 @@
  */
 
 /**
- * SECTION:element-qmlglsink
+ * SECTION:gstqtsink
  *
  * qmlglsink provides a way to render a video stream as a Qml object inside
  * the Qml scene graph.  This is achieved by providing the incoming OpenGL
@@ -108,12 +108,11 @@ GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("video/x-raw(" GST_CAPS_FEATURE_MEMORY_GL_MEMORY "), "
-    "format = (string) { RGB, RGBA, RGB16, BGRA, BGR16, YV12, NV12 }, "
+    "format = (string) { RGB, RGBA, BGRA, YV12 }, "
     "width = " GST_VIDEO_SIZE_RANGE ", "
     "height = " GST_VIDEO_SIZE_RANGE ", "
     "framerate = " GST_VIDEO_FPS_RANGE ", "
-    "texture-target = (string) { " GST_GL_TEXTURE_TARGET_2D_STR ", "
-                                   GST_GL_TEXTURE_TARGET_EXTERNAL_OES_STR " } "));
+    "texture-target = (string) 2D"));
 
 #define DEFAULT_FORCE_ASPECT_RATIO  TRUE
 #define DEFAULT_PAR_N               0
@@ -317,8 +316,8 @@ gst_qt_sink_query (GstBaseSink * bsink, GstQuery * query)
           qt_sink->display, qt_sink->context, qt_sink->qt_context))
         return TRUE;
 
+      /* fallthrough */
     }
-    /* FALLTHROUGH */
     default:
       res = GST_BASE_SINK_CLASS (parent_class)->query (bsink, query);
       break;

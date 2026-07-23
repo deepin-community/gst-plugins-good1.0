@@ -2441,7 +2441,6 @@ rtp_session_process_rb (RTPSession * sess, RTPSource * source,
     GstRTCPPacket * packet, RTPPacketInfo * pinfo)
 {
   guint count, i;
-  guint32 sender_ssrc = source->ssrc;
 
   count = gst_rtcp_packet_get_rb_count (packet);
   for (i = 0; i < count; i++) {
@@ -2453,8 +2452,7 @@ rtp_session_process_rb (RTPSession * sess, RTPSource * source,
     gst_rtcp_packet_get_rb (packet, i, &ssrc, &fractionlost,
         &packetslost, &exthighestseq, &jitter, &lsr, &dlsr);
 
-    GST_DEBUG ("RB %d from SSRC %08x: SSRC %08x, jitter %" G_GUINT32_FORMAT, i,
-        sender_ssrc, ssrc, jitter);
+    GST_DEBUG ("RB %d: SSRC %08x, jitter %" G_GUINT32_FORMAT, i, ssrc, jitter);
 
     /* find our own source */
     src = find_source (sess, ssrc);
@@ -2463,20 +2461,18 @@ rtp_session_process_rb (RTPSession * sess, RTPSource * source,
 
     if (src->internal && RTP_SOURCE_IS_ACTIVE (src)) {
       /* only deal with report blocks for our session, we update the stats of
-       * the ssrc the RTCP message is about. We could also compare our stats against
+       * the sender of the RTCP message. We could also compare our stats against
        * the other sender to see if we are better or worse. */
-      rtp_source_process_rb (src, ssrc, sender_ssrc, pinfo->ntpnstime,
-          fractionlost, packetslost, exthighestseq, jitter, lsr, dlsr);
-      /* deprecated: it is also stored in the non-internal source */
-      rtp_source_process_rb (source, ssrc, sender_ssrc, pinfo->ntpnstime,
-          fractionlost, packetslost, exthighestseq, jitter, lsr, dlsr);
+      /* FIXME, need to keep track who the RB block is from */
+      rtp_source_process_rb (source, ssrc, pinfo->ntpnstime, fractionlost,
+          packetslost, exthighestseq, jitter, lsr, dlsr);
     }
   }
   on_ssrc_active (sess, source);
 }
 
 /* A Sender report contains statistics about how the sender is doing. This
- * includes timing information such as the relation between RTP and NTP
+ * includes timing informataion such as the relation between RTP and NTP
  * timestamps and the number of packets/bytes it sent to us.
  *
  * In this report is also included a set of report blocks related to how this

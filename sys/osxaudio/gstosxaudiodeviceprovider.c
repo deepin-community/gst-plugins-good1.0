@@ -97,15 +97,10 @@ gst_osx_audio_device_provider_probe_device (GstOsxAudioDeviceProvider *
 {
   GstOsxAudioDevice *device = NULL;
   GstCoreAudio *core_audio;
-  gboolean is_src = type == GST_OSX_AUDIO_DEVICE_TYPE_SOURCE ? TRUE : FALSE;
 
-  core_audio = g_object_new (GST_TYPE_CORE_AUDIO,
-      "is-src", is_src, "device", device_id, NULL);
-
-  if (!gst_core_audio_select_device (core_audio)) {
-    GST_ERROR ("CoreAudio device coult not be selected");
-    goto done;
-  }
+  core_audio = gst_core_audio_new (NULL);
+  core_audio->is_src = type == GST_OSX_AUDIO_DEVICE_TYPE_SOURCE ? TRUE : FALSE;
+  core_audio->device_id = device_id;
 
   if (!gst_core_audio_open (core_audio)) {
     GST_ERROR ("CoreAudio device could not be opened");
@@ -120,6 +115,45 @@ done:
   g_object_unref (core_audio);
 
   return device;
+}
+
+static inline gchar *
+_audio_device_get_name (AudioDeviceID device_id, gboolean output)
+{
+  OSStatus status = noErr;
+  UInt32 propertySize = 0;
+  gchar *device_name = NULL;
+  AudioObjectPropertyScope prop_scope;
+
+  AudioObjectPropertyAddress deviceNameAddress = {
+    kAudioDevicePropertyDeviceName,
+    kAudioDevicePropertyScopeOutput,
+    kAudioObjectPropertyElementMain
+  };
+
+  prop_scope = output ? kAudioDevicePropertyScopeOutput :
+      kAudioDevicePropertyScopeInput;
+
+  deviceNameAddress.mScope = prop_scope;
+
+  /* Get the length of the device name */
+  status = AudioObjectGetPropertyDataSize (device_id,
+      &deviceNameAddress, 0, NULL, &propertySize);
+  if (status != noErr) {
+    goto beach;
+  }
+
+  /* Get the name of the device */
+  device_name = (gchar *) g_malloc (propertySize);
+  status = AudioObjectGetPropertyData (device_id,
+      &deviceNameAddress, 0, NULL, &propertySize, device_name);
+  if (status != noErr) {
+    g_free (device_name);
+    device_name = NULL;
+  }
+
+beach:
+  return device_name;
 }
 
 static inline gboolean
@@ -273,42 +307,50 @@ _stop_audio_device_watcher (GstOsxAudioDeviceProvider * self)
 
 static void
 gst_osx_audio_device_provider_probe_internal (GstOsxAudioDeviceProvider * self,
-    AudioDeviceID * osx_devices, gint ndevices, GList ** devices)
+    gboolean is_src, AudioDeviceID * osx_devices, gint ndevices,
+    GList ** devices)
 {
-  for (int i = 0; i < ndevices; i++) {
-    char *device_name;
-    GstOsxAudioDevice *device;
+  gint i = 0;
+  GstOsxAudioDeviceType type = GST_OSX_AUDIO_DEVICE_TYPE_INVALID;
+  GstOsxAudioDevice *device = NULL;
 
-    device_name = gst_core_audio_device_get_prop (osx_devices[i],
-        kAudioObjectPropertyName);
-    if (!device_name)
-      continue;
+  if (is_src) {
+    type = GST_OSX_AUDIO_DEVICE_TYPE_SOURCE;
+  } else {
+    type = GST_OSX_AUDIO_DEVICE_TYPE_SINK;
+  }
 
-    if (_audio_device_has_input (osx_devices[i])) {
+  for (i = 0; i < ndevices; i++) {
+    gchar *device_name;
+
+    if ((device_name = _audio_device_get_name (osx_devices[i], FALSE))) {
+      gboolean has_output = _audio_device_has_output (osx_devices[i]);
+      gboolean has_input = _audio_device_has_input (osx_devices[i]);
+
+      if (is_src && !has_input) {
+        goto cleanup;
+      } else if (!is_src && !has_output) {
+        goto cleanup;
+      }
+
       device =
           gst_osx_audio_device_provider_probe_device (self, osx_devices[i],
-          device_name, GST_OSX_AUDIO_DEVICE_TYPE_SOURCE);
+          device_name, type);
       if (device) {
-        GST_DEBUG ("Input Device ID: %u Name: %s", (unsigned) osx_devices[i],
-            device_name);
+        if (is_src) {
+          GST_DEBUG ("Input Device ID: %u Name: %s",
+              (unsigned) osx_devices[i], device_name);
+        } else {
+          GST_DEBUG ("Output Device ID: %u Name: %s",
+              (unsigned) osx_devices[i], device_name);
+        }
         gst_object_ref_sink (device);
         *devices = g_list_prepend (*devices, device);
       }
-    }
 
-    if (_audio_device_has_output (osx_devices[i])) {
-      device =
-          gst_osx_audio_device_provider_probe_device (self, osx_devices[i],
-          device_name, GST_OSX_AUDIO_DEVICE_TYPE_SINK);
-      if (device) {
-        GST_DEBUG ("Output Device ID: %u Name: %s", (unsigned) osx_devices[i],
-            device_name);
-        gst_object_ref_sink (device);
-        *devices = g_list_prepend (*devices, device);
-      }
+    cleanup:
+      g_free (device_name);
     }
-
-    g_free (device_name);
   }
 }
 
@@ -329,8 +371,10 @@ gst_osx_audio_device_provider_probe (GstDeviceProvider * provider)
 
   GST_INFO ("found %d audio device(s)", ndevices);
 
-  gst_osx_audio_device_provider_probe_internal (self, osx_devices, ndevices,
-      &devices);
+  gst_osx_audio_device_provider_probe_internal (self, TRUE, osx_devices,
+      ndevices, &devices);
+  gst_osx_audio_device_provider_probe_internal (self, FALSE, osx_devices,
+      ndevices, &devices);
 
 done:
   g_free (osx_devices);
@@ -509,18 +553,9 @@ gst_osx_audio_device_new (AudioDeviceID device_id, const gchar * device_name,
   const gchar *element_name = NULL;
   const gchar *klass = NULL;
   GstCaps *template_caps, *caps;
-  GstStructure *props = gst_structure_new_empty ("properties");
 
   g_return_val_if_fail (device_id > 0, NULL);
   g_return_val_if_fail (device_name, NULL);
-
-  gst_structure_set (props, "is-default", G_TYPE_BOOLEAN,
-      core_audio->is_default, NULL);
-
-  if (core_audio->unique_id != NULL) {
-    gst_structure_set (props, "unique-id", G_TYPE_STRING,
-        core_audio->unique_id, NULL);
-  }
 
   switch (type) {
     case GST_OSX_AUDIO_DEVICE_TYPE_SOURCE:
@@ -547,8 +582,8 @@ gst_osx_audio_device_new (AudioDeviceID device_id, const gchar * device_name,
   }
 
   gstdev = g_object_new (GST_TYPE_OSX_AUDIO_DEVICE, "device-id",
-      device_id, "display-name", device_name, "caps", caps,
-      "properties", props, "device-class", klass, NULL);
+      device_id, "display-name", device_name, "caps", caps, "device-class",
+      klass, NULL);
 
   gstdev->element = element_name;
 

@@ -86,11 +86,6 @@ struct _GstRtpH265Depay
   /* downstream allocator */
   GstAllocator *allocator;
   GstAllocationParams params;
-
-  gboolean wait_for_keyframe;
-  gboolean request_keyframe;
-  gboolean waiting_for_keyframe;
-  gboolean requesting_keyframe;
 };
 
 struct _GstRtpH265DepayClass

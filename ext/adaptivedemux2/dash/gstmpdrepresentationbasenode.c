@@ -190,16 +190,22 @@ gst_mpd_representation_base_node_finalize (GObject * object)
   GstMPDRepresentationBaseNode *self =
       GST_MPD_REPRESENTATION_BASE_NODE (object);
 
-  g_free (self->profiles);
+  if (self->profiles)
+    xmlFree (self->profiles);
   g_free (self->sar);
   g_free (self->frameRate);
   g_free (self->minFrameRate);
   g_free (self->maxFrameRate);
-  g_free (self->audioSamplingRate);
-  g_free (self->mimeType);
-  g_free (self->segmentProfiles);
-  g_free (self->codecs);
-  g_free (self->scanType);
+  if (self->audioSamplingRate)
+    xmlFree (self->audioSamplingRate);
+  if (self->mimeType)
+    xmlFree (self->mimeType);
+  if (self->segmentProfiles)
+    xmlFree (self->segmentProfiles);
+  if (self->codecs)
+    xmlFree (self->codecs);
+  if (self->scanType)
+    xmlFree (self->scanType);
   g_list_free_full (self->FramePacking,
       (GDestroyNotify) gst_mpd_descriptor_type_node_free);
   g_list_free_full (self->AudioChannelConfiguration,

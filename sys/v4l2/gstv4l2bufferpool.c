@@ -80,15 +80,6 @@ enum _GstV4l2BufferState
   BUFFER_STATE_QUEUED = 2,
 };
 
-enum
-{
-  OUTPUT_ERROR_DEQUEUED,
-  CAPTURE_ERROR_DEQUEUED,
-  LAST_SIGNAL
-};
-
-static guint gst_v4l2_buffer_pool_signals[LAST_SIGNAL] = { 0 };
-
 static void gst_v4l2_buffer_pool_complete_release_buffer (GstBufferPool * bpool,
     GstBuffer * buffer, gboolean queued);
 
@@ -148,7 +139,7 @@ static GstFlowReturn
 gst_v4l2_buffer_pool_copy_buffer (GstV4l2BufferPool * pool, GstBuffer * dest,
     GstBuffer * src)
 {
-  const GstVideoFormatInfo *finfo = pool->caps_info.vinfo.finfo;
+  const GstVideoFormatInfo *finfo = pool->caps_info.finfo;
 
   GST_LOG_OBJECT (pool, "copying buffer");
 
@@ -159,11 +150,10 @@ gst_v4l2_buffer_pool_copy_buffer (GstV4l2BufferPool * pool, GstBuffer * dest,
     GST_DEBUG_OBJECT (pool, "copy video frame");
 
     /* we have raw video, use videoframe copy to get strides right */
-    if (!gst_video_frame_map (&src_frame, &pool->caps_info.vinfo, src,
-            GST_MAP_READ))
+    if (!gst_video_frame_map (&src_frame, &pool->caps_info, src, GST_MAP_READ))
       goto invalid_buffer;
 
-    if (!gst_video_frame_map (&dest_frame, &pool->caps_info.vinfo, dest,
+    if (!gst_video_frame_map (&dest_frame, &pool->caps_info, dest,
             GST_MAP_WRITE)) {
       gst_video_frame_unmap (&src_frame);
       goto invalid_buffer;
@@ -243,7 +233,7 @@ gst_v4l2_buffer_pool_import_userptr (GstV4l2BufferPool * pool,
   GstFlowReturn ret = GST_FLOW_OK;
   GstV4l2MemoryGroup *group = NULL;
   GstMapFlags flags;
-  const GstVideoFormatInfo *finfo = pool->caps_info.vinfo.finfo;
+  const GstVideoFormatInfo *finfo = pool->caps_info.finfo;
   struct UserPtrData *data = NULL;
 
   GST_LOG_OBJECT (pool, "importing userptr");
@@ -266,7 +256,7 @@ gst_v4l2_buffer_pool_import_userptr (GstV4l2BufferPool * pool,
 
     data->is_frame = TRUE;
 
-    if (!gst_video_frame_map (&data->frame, &pool->caps_info.vinfo, src, flags))
+    if (!gst_video_frame_map (&data->frame, &pool->caps_info, src, flags))
       goto invalid_buffer;
 
     for (i = 0; i < GST_VIDEO_FORMAT_INFO_N_PLANES (finfo); i++) {
@@ -459,7 +449,7 @@ gst_v4l2_buffer_pool_alloc_buffer (GstBufferPool * bpool, GstBuffer ** buffer,
   GstVideoInfo *info;
 
   obj = pool->obj;
-  info = &obj->info.vinfo;
+  info = &obj->info;
 
   switch (obj->mode) {
     case GST_V4L2_IO_RW:
@@ -536,18 +526,14 @@ gst_v4l2_buffer_pool_set_config (GstBufferPool * bpool, GstStructure * config)
   gboolean updated = FALSE;
   gboolean ret;
 
-  /* parse the config and keep around */
-  if (!gst_buffer_pool_config_get_params (config, &caps, &size, &min_buffers,
-          &max_buffers))
-    goto wrong_config;
-
   pool->add_videometa =
       gst_buffer_pool_config_has_option (config,
       GST_BUFFER_POOL_OPTION_VIDEO_META);
 
-  /* Always enable VideoMeta when we negotiate memory:DMABuf */
-  pool->have_dma_drm_caps = gst_video_is_dma_drm_caps (caps);
-  pool->add_videometa |= pool->have_dma_drm_caps;
+  /* parse the config and keep around */
+  if (!gst_buffer_pool_config_get_params (config, &caps, &size, &min_buffers,
+          &max_buffers))
+    goto wrong_config;
 
   if (!gst_buffer_pool_config_get_allocator (config, &allocator, &params))
     goto wrong_config;
@@ -636,15 +622,11 @@ gst_v4l2_buffer_pool_set_config (GstBufferPool * bpool, GstStructure * config)
   }
 
   /* Always update the config to ensure the configured size matches */
-  gst_buffer_pool_config_set_params (config, caps, obj->info.vinfo.size,
-      min_buffers, max_buffers);
+  gst_buffer_pool_config_set_params (config, caps, obj->info.size, min_buffers,
+      max_buffers);
 
   /* keep a GstVideoInfo with defaults for the when we need to copy */
-  gst_video_info_dma_drm_init (&pool->caps_info);
-  if (!gst_video_info_dma_drm_from_caps (&pool->caps_info, caps) &&
-      !gst_video_info_from_caps (&pool->caps_info.vinfo, caps)) {
-    goto wrong_config;
-  }
+  gst_video_info_from_caps (&pool->caps_info, caps);
 
 done:
   ret = GST_BUFFER_POOL_CLASS (parent_class)->set_config (bpool, config);
@@ -1273,7 +1255,7 @@ gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer,
   GstV4l2Object *obj = pool->obj;
   GstClockTime timestamp;
   GstV4l2MemoryGroup *group;
-  const GstVideoInfo *info = &obj->info.vinfo;
+  const GstVideoInfo *info = &obj->info;
   gint i;
   gint old_buffer_state;
 
@@ -1293,20 +1275,10 @@ gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer,
   GST_LOG_OBJECT (pool, "dequeueing a buffer");
 
   res = gst_v4l2_allocator_dqbuf (pool->vallocator, &group);
-
   if (res == GST_V4L2_FLOW_LAST_BUFFER)
     goto eos;
   if (res != GST_FLOW_OK)
     goto dqbuf_failed;
-
-  if (group->buffer.flags & V4L2_BUF_FLAG_ERROR) {
-    if (V4L2_TYPE_IS_OUTPUT (obj->type))
-      g_signal_emit (pool, gst_v4l2_buffer_pool_signals[OUTPUT_ERROR_DEQUEUED],
-          0, (guint) group->buffer.timestamp.tv_sec);
-    else
-      g_signal_emit (pool, gst_v4l2_buffer_pool_signals[CAPTURE_ERROR_DEQUEUED],
-          0, (guint) group->buffer.timestamp.tv_sec);
-  }
 
   old_buffer_state =
       g_atomic_int_and (&pool->buffer_state[group->buffer.index],
@@ -1352,8 +1324,7 @@ gst_v4l2_buffer_pool_dqbuf (GstV4l2BufferPool * pool, GstBuffer ** buffer,
         group->planes[i].bytesused, i, group->buffer.flags,
         GST_TIME_ARGS (timestamp), pool->num_queued, outbuf, old_buffer_state);
 
-    if (GST_VIDEO_INFO_FORMAT (&pool->caps_info.vinfo) ==
-        GST_VIDEO_FORMAT_ENCODED)
+    if (GST_VIDEO_INFO_FORMAT (&pool->caps_info) == GST_VIDEO_FORMAT_ENCODED)
       break;
 
     if (obj->type == V4L2_BUF_TYPE_VIDEO_CAPTURE ||
@@ -1790,14 +1761,6 @@ gst_v4l2_buffer_pool_class_init (GstV4l2BufferPoolClass * klass)
   bufferpool_class->flush_start = gst_v4l2_buffer_pool_flush_start;
   bufferpool_class->flush_stop = gst_v4l2_buffer_pool_flush_stop;
 
-  gst_v4l2_buffer_pool_signals[OUTPUT_ERROR_DEQUEUED] =
-      g_signal_new ("output-error-dequeued", G_TYPE_FROM_CLASS (object_class),
-      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_UINT);
-
-  gst_v4l2_buffer_pool_signals[CAPTURE_ERROR_DEQUEUED] =
-      g_signal_new ("capture-error-dequeued", G_TYPE_FROM_CLASS (object_class),
-      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_UINT);
-
   GST_DEBUG_CATEGORY_INIT (v4l2bufferpool_debug, "v4l2bufferpool", 0,
       "V4L2 Buffer Pool");
   GST_DEBUG_CATEGORY_GET (CAT_PERFORMANCE, "GST_PERFORMANCE");
@@ -1845,7 +1808,7 @@ gst_v4l2_buffer_pool_new (GstV4l2Object * obj, GstCaps * caps)
   gst_object_ref (obj->element);
 
   config = gst_buffer_pool_get_config (GST_BUFFER_POOL_CAST (pool));
-  gst_buffer_pool_config_set_params (config, caps, obj->info.vinfo.size, 0, 0);
+  gst_buffer_pool_config_set_params (config, caps, obj->info.size, 0, 0);
   /* This will simply set a default config, but will not configure the pool
    * because min and max are not valid */
   gst_buffer_pool_set_config (GST_BUFFER_POOL_CAST (pool), config);
@@ -1875,7 +1838,7 @@ gst_v4l2_do_read (GstV4l2BufferPool * pool, GstBuffer * buf)
   GstMapInfo map;
   gint toread;
 
-  toread = obj->info.vinfo.size;
+  toread = obj->info.size;
 
   GST_LOG_OBJECT (pool, "reading %d bytes into buffer %p", toread, buf);
 
@@ -1981,7 +1944,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf,
               goto eos;
             }
 
-            if (GST_VIDEO_INFO_FORMAT (&pool->caps_info.vinfo) !=
+            if (GST_VIDEO_INFO_FORMAT (&pool->caps_info) !=
                 GST_VIDEO_FORMAT_ENCODED && size < pool->size)
               goto buffer_truncated;
 
@@ -2191,7 +2154,7 @@ gst_v4l2_buffer_pool_process (GstV4l2BufferPool * pool, GstBuffer ** buf,
           }
 
           /* Save the amount of data that has been submitted for encoded data */
-          if (GST_VIDEO_INFO_FORMAT (&pool->caps_info.vinfo) ==
+          if (GST_VIDEO_INFO_FORMAT (&pool->caps_info) ==
               GST_VIDEO_FORMAT_ENCODED) {
             queued_size = gst_buffer_get_size (to_queue);
             remaining_size = gst_buffer_get_size (*buf) - queued_size;
@@ -2306,8 +2269,7 @@ void
 gst_v4l2_buffer_pool_copy_at_threshold (GstV4l2BufferPool * pool, gboolean copy)
 {
   GST_OBJECT_LOCK (pool);
-  /* Ignore copy threashold when memory:DMABuf caps features is in used */
-  pool->enable_copy_threshold = copy && !pool->have_dma_drm_caps;
+  pool->enable_copy_threshold = copy;
   GST_OBJECT_UNLOCK (pool);
 }
 

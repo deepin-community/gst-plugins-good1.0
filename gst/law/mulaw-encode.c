@@ -35,11 +35,17 @@
 extern GstStaticPadTemplate mulaw_enc_src_factory;
 extern GstStaticPadTemplate mulaw_enc_sink_factory;
 
+#if G_BYTE_ORDER == G_LITTLE_ENDIAN
+#define INT_FORMAT "S16LE"
+#else
+#define INT_FORMAT "S16BE"
+#endif
+
 GstStaticPadTemplate mulaw_enc_sink_factory = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("audio/x-raw, "
-        "format = (string) " GST_AUDIO_NE (S16) ", "
+        "format = (string) " INT_FORMAT ", "
         "layout = (string) interleaved, "
         "rate = (int) [ 8000, 192000 ], " "channels = (int) [ 1, 2 ]")
     );
