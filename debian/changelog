@@ -1,3 +1,9 @@
+gst-plugins-good1.0 (1.24.13-0deepin9) unstable; urgency=medium
+
+  * fix(cve): CVE-2026-73434
+
+ -- deepin-ci-robot <packages@deepin.org>  Wed, 19 Aug 2026 10:56:51 +0800
+
 gst-plugins-good1.0 (1.24.13-0deepin8) unstable; urgency=medium
 
   * fix(cve): CVE-2026-18649
