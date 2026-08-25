@@ -17,6 +17,7 @@
 0016-CVE-2026-46469-qtdemux-Avoid-division-by-zero-when.patch
 0017-CVE-2026-46470-qtdemux-Avoid-division-by-zero-in-a.patch
 0018-CVE-2026-53705-wavpackdec-Fix-integer-overflow-in-buf.patch
+0019-CVE-2026-39043-matroska-fix-heap-buffer-overflow-in-b.patch
 CVE-2026-39044.patch
 CVE-2026-17072.patch
 CVE-2026-18649.patch
