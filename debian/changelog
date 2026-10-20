@@ -4,6 +4,17 @@ gst-plugins-good1.0 (1.24.13-0deepin13) unstable; urgency=medium
     data is available for reading closed caption boxes   Upstream:
     https://gitlab.freedesktop.org/gstreamer/gstreamer/-
     /commit/a2a14d1b23d4a74d388f43745f000ea4999bf1d3
+  * fix(cve): CVE-2026-46472 (unknown) - qtdemux: Avoid division by zero
+    if 0 audio channels are signalled (and 3 related channel-layout
+    hardening commits)   Upstream:
+    https://gitlab.freedesktop.org/gstreamer/gstreamer/-
+    /commit/dbd4cb49e72836d2372de2d2043d28c7a7fce9c4,https://gitlab.free
+    desktop.org/gstreamer/gstreamer/-
+    /commit/10fd1abfdb793641b4eb0454478e01fd74648d5c,https://gitlab.free
+    desktop.org/gstreamer/gstreamer/-
+    /commit/34418818730bc04e41f512e65331b3f206cb5eb9,https://gitlab.free
+    desktop.org/gstreamer/gstreamer/-
+    /commit/dc7ab66ab23a054eaa942071cfb548d47fe4ca2f
 
  -- deepin-ci-robot <packages@deepin.org>  Fri, 11 Sep 2026 20:12:05 +0800
 
