@@ -15,6 +15,10 @@ gst-plugins-good1.0 (1.24.13-0deepin13) unstable; urgency=medium
     /commit/34418818730bc04e41f512e65331b3f206cb5eb9,https://gitlab.free
     desktop.org/gstreamer/gstreamer/-
     /commit/dc7ab66ab23a054eaa942071cfb548d47fe4ca2f
+  * fix(cve): CVE-2026-111183 (critical) -
+    rtpL8depay、rtpL16depay、rtpL24depay：修复高声道数场景下的越界写入   Upstream:
+    https://gitlab.freedesktop.org/gstreamer/gstreamer/-
+    /commit/6f6512da5ef13004bec5e274df2e30665520597f
 
  -- deepin-ci-robot <packages@deepin.org>  Fri, 11 Sep 2026 20:12:05 +0800
 
