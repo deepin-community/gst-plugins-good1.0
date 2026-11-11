@@ -1,6 +1,10 @@
 gst-plugins-good1.0 (1.24.13-0deepin14) unstable; urgency=medium
 
   * fix: build taglib plugin against taglib2, drop libtag1v5 dependency
+  * fix(cve): CVE-2026-121629 (unknown) - adaptivedemux2: Restrict URI
+    schemes in the download helper   Upstream:
+    https://gitlab.freedesktop.org/gstreamer/gstreamer/-
+    /commit/6b00d0a4ca7ba6415b00b870c7f10f27f6fc5cd7.patch
 
  -- zhanghongyuan <zhanghongyuan@uniontech.com>  Tue, 10 Nov 2026 11:12:12 +0800
 
