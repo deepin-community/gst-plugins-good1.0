@@ -5,6 +5,11 @@ gst-plugins-good1.0 (1.24.13-0deepin14) unstable; urgency=medium
     schemes in the download helper   Upstream:
     https://gitlab.freedesktop.org/gstreamer/gstreamer/-
     /commit/6b00d0a4ca7ba6415b00b870c7f10f27f6fc5cd7.patch
+  * fix(cve): CVE-2026-119610 (unknown) - rtph264depay: Fix out of
+    bounds read in MTAP16/MTAP24 depayloading   Upstream:
+    https://gitlab.freedesktop.org/gstreamer/gstreamer/-
+    /commit/bf14ac8782c7ea23c04c3b322d2ba9366f906503,https://gitlab.free
+    desktop.org/gstreamer/gstreamer/-/merge_requests/12991
 
  -- zhanghongyuan <zhanghongyuan@uniontech.com>  Tue, 10 Nov 2026 11:12:12 +0800
 
